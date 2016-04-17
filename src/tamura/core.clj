@@ -62,7 +62,7 @@
     (update sub tick value)))
 
 ;; f *must* produce a new value
-(deftype FunctionProducer
+(deftype FunctionReactor
   [f state]
   Reactor
   (value [this]
@@ -74,6 +74,19 @@
   (update [this tick value]
     (let [v (f tick value)]
       (swap! state assoc :value v)
+      (update-subscribers (:subscribers @state) nil (:value @state)))))
+
+(deftype FunctionProducer
+  [f state]
+  Producer
+  (value [this]
+    (:value @state))
+  (subscribe [this reactor]
+    (swap! state #(assoc % :subscribers (cons reactor (:subscribers %)))))
+  (height [this]
+    (:height @state))
+  (tick [this]
+    (when (f state)
       (update-subscribers (:subscribers @state) nil (:value @state)))))
 
 (core/defn make-redis
