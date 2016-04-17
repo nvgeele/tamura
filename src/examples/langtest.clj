@@ -7,11 +7,10 @@
 
 (t/defsig in (t/make-redis "localhost" "bxlqueue"))
 (t/map println in)
+((t/lift println) in)
 
 ;; (t/defn y [x] (+ x x))
 
 (defn -main
   [& args]
-  ;; (println (y))
-  (println x)
-  )
+  nil)

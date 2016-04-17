@@ -1,5 +1,6 @@
 (ns tamura.core
   (:require [clojure.core :as core]
+            [clojure.edn :as edn]
             [potemkin :as p]
             [tamura.macros :as macros]
             [tamura.values :as v]
@@ -29,19 +30,16 @@
   (println "Installing tamura...")
   nil)
 
-;; TODO: update height
-(defprotocol Producer
+(defprotocol Reactive
   (value [this])
   (subscribe [this reactor])
-  (height [this])
+  (height [this]))
 
+;; TODO: update height
+(defprotocol Producer
   (tick [this]))
 
 (defprotocol Reactor
-  (value [this])
-  (subscribe [this reactor])
-  (height [this])
-
   (update [this tick value]))
 
 ;; TODO: use threadpool?
@@ -60,35 +58,40 @@
   (doseq [sub subscribers]
     (update sub tick value)))
 
-;; f *must* produce a new value
-(deftype FunctionReactor
-  [f state]
-  Reactor
-  (value [this]
-    (:value @state))
-  (subscribe [this reactor]
-    (swap! state #(assoc % :subscribers (cons reactor (:subscribers %)))))
-  (height [this]
-    (:height @state))
-  (update [this tick value]
-    (let [v (f tick value)]
-      (swap! state assoc :value v)
-      (update-subscribers (:subscribers @state) nil (:value @state)))))
-
 ;; f should receive boolean, not the value, as the value produced could be false.
 ;; therefore f is responsible for swapping the new value in etc.
 (deftype FunctionProducer
   [f state]
   Producer
-  (value [this]
-    (:value @state))
-  (subscribe [this reactor]
-    (swap! state #(assoc % :subscribers (cons reactor (:subscribers %)))))
-  (height [this]
-    (:height @state))
   (tick [this]
     (when (f state)
       (update-subscribers (:subscribers @state) nil (:value @state)))))
+
+;; f *must* produce a new value
+(deftype FunctionReactor
+  [f state]
+  Reactor
+  (update [this tick value]
+    (let [v (f tick value)]
+      (swap! state assoc :value v)
+      (update-subscribers (:subscribers @state) nil (:value @state)))))
+
+(extend-protocol Reactive
+  FunctionProducer
+  (value [this]
+    (:value @(.state this)))
+  (subscribe [this reactor]
+    (swap! (.state this) #(assoc % :subscribers (cons reactor (:subscribers %)))))
+  (height [this]
+    (:height @(.state this)))
+
+  FunctionReactor
+  (value [this]
+    (:value @(.state this)))
+  (subscribe [this reactor]
+    (swap! (.state this) #(assoc % :subscribers (cons reactor (:subscribers %)))))
+  (height [this]
+    (:height @(.state this))))
 
 (core/defn make-redis
   [host key]
@@ -101,9 +104,8 @@
                :height 0}
         f (fn [state]
             (when-let [v (.rpop (:conn @state) (:key @state))]
-              (println "Received something")
-              (swap! state assoc :value v)
-              (update-subscribers (:subscribers @state) nil v)))
+              (swap! state assoc :value (edn/read-string v))
+              (update-subscribers (:subscribers @state) nil (:value @state))))
         producer (new FunctionProducer f (atom state))]
     (make-producer-thread producer 10)
     (v/make-eventstream producer)))
@@ -128,19 +130,6 @@
     (if (v/eventstream? arg)
       (map f arg)
       (throw (Exception. "Argument for lifted function should be an event stream")))))
-
-#_(defn map
-      [f lst]
-      (if (isa? lst v/Signal)
-        (throw (Exception. "ToDo"))
-        (core/map f lst)))
-
-#_(defn lift
-      [f]
-      (fn [arg]
-        (f arg)))
-
-;; (core/defn make-printer)
 
 (core/defn -main
   [& args]
