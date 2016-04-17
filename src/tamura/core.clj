@@ -2,7 +2,7 @@
   (:require [clojure.core :as core]
             [potemkin :as p]
             [tamura.macros :as macros]
-            [tamura.values :as values]
+            [tamura.values :as v]
             [tamura.funcs :as funcs])
   (:import [redis.clients.jedis JedisPool]))
 
@@ -45,18 +45,16 @@
   (update [this tick value]))
 
 ;; TODO: use threadpool?
-(core/defn- make-producer
-  [type rate args]
-  (let [obj (eval `(new ~type ~@args))
-        t (Thread.
-            (fn [] (loop
-                     (tick obj)
+(core/defn- make-producer-thread
+  [producer rate]
+  (let [t (Thread.
+            (fn [] (loop []
+                     (tick producer)
                      (Thread/sleep rate)
                      (recur))))]
     (.start t)
-    obj))
+    t))
 
-(core/defn update-subscribers
 (core/defn- update-subscribers
   [subscribers tick value]
   (doseq [sub subscribers]
@@ -77,6 +75,8 @@
       (swap! state assoc :value v)
       (update-subscribers (:subscribers @state) nil (:value @state)))))
 
+;; f should receive boolean, not the value, as the value produced could be false.
+;; therefore f is responsible for swapping the new value in etc.
 (deftype FunctionProducer
   [f state]
   Producer
@@ -101,11 +101,33 @@
                :height 0}
         f (fn [state]
             (when-let [v (.rpop (:conn @state) (:key @state))]
+              (println "Received something")
               (swap! state assoc :value v)
-              (update-subscribers (:subscribers @state) nil v)))]
-    (v/make-eventstream (make-producer RedisSource 10 [f (atom state)]))))
+              (update-subscribers (:subscribers @state) nil v)))
+        producer (new FunctionProducer f (atom state))]
+    (make-producer-thread producer 10)
+    (v/make-eventstream producer)))
 
-(core/def redis make-redis)
+(def redis make-redis)
+
+(core/defn map
+  [f arg]
+  (if (v/eventstream? arg)
+    (let [prod (v/value arg)
+          ph (height prod)
+          state (atom {:subscribers [] :value nil :height (inc ph)})
+          mf (fn [tick value] (f value))
+          reactor (new FunctionReactor mf state)]
+      (subscribe prod reactor)
+      (v/make-eventstream reactor))
+    (core/map f arg)))
+
+(core/defn lift
+  [f]
+  (fn [arg]
+    (if (v/eventstream? arg)
+      (map f arg)
+      (throw (Exception. "Argument for lifted function should be an event stream")))))
 
 #_(defn map
       [f lst]

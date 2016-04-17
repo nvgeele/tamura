@@ -5,7 +5,8 @@
 
 ;; (t/def x 1)
 
-(def x 1)
+(t/defsig in (t/make-redis "localhost" "bxlqueue"))
+(t/map println in)
 
 ;; (t/defn y [x] (+ x x))
 
