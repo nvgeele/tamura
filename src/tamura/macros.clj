@@ -3,6 +3,8 @@
             [clojure.tools.logging :as log]
             [tamura.values :as v]))
 
+;; TODO: letsig ?
+
 (defmacro def
   [name value]
   (log/info "Yay, def!")
