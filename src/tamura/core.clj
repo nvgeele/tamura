@@ -61,20 +61,20 @@
   (doseq [sub subscribers]
     (update sub tick value)))
 
-(deftype RedisSource
-  [state]
-  Producer
+;; f *must* produce a new value
+(deftype FunctionProducer
+  [f state]
+  Reactor
   (value [this]
-    (:value state))
+    (:value @state))
   (subscribe [this reactor]
     (swap! state #(assoc % :subscribers (cons reactor (:subscribers %)))))
   (height [this]
-    (:height state))
-
-  (tick [this]
-    (when-let [v (.rpop (:conn state) (:key state))]
-      ;; TODO: set current value
-      (update-subscribers (:subscribers state) nil v))))
+    (:height @state))
+  (update [this tick value]
+    (let [v (f tick value)]
+      (swap! state assoc :value v)
+      (update-subscribers (:subscribers @state) nil (:value @state)))))
 
 (core/defn make-redis
   [host key]
@@ -84,13 +84,14 @@
                :key key
                :subscribers []
                :value nil
-               :height 0}]
-    (v/make-eventstream (make-producer RedisSource 10 [state]))))
+               :height 0}
+        f (fn [state]
+            (when-let [v (.rpop (:conn @state) (:key @state))]
+              (swap! state assoc :value v)
+              (update-subscribers (:subscribers @state) nil v)))]
+    (v/make-eventstream (make-producer RedisSource 10 [f (atom state)]))))
 
 (core/def redis make-redis)
-
-(core/defn lift
-  [f])
 
 #_(defn map
       [f lst]
