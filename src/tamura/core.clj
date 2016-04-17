@@ -2,15 +2,21 @@
   (:require [potemkin :as p]
             [tamura.macros :as macros]
             [tamura.values :as values]
+            [tamura.funcs :as funcs]
+            [clojure.core :as core]))
 
-    ;;[clojure.core ]
-            ))
+(p/import-vars
+  [tamura.macros
 
-(macros/import-macros tamura.macros [def #_defn #_fn])
+   def
+   defn
+   defsig]
 
-;; (p/import-vars)
+  [tamura.funcs
 
-#_(defn default-eval
+   map])
+
+#_(core/defn default-eval
   [form]
   (. clojure.lang.Compiler (eval form)))
 
@@ -30,7 +36,7 @@
   (println (meta *ns*))
   (default-apply f args))
 
-(defn spread
+(core/defn spread
   {:private true
    :static true}
   [arglist]
@@ -39,17 +45,17 @@
     (nil? (next arglist)) (seq (first arglist))
     :else (cons (first arglist) (spread (next arglist)))))
 
-(defn printer
+(core/defn printer
   [x]
   println
   (let [s (seq x)]
     (. (. System out) (println s))))
 
-(defn my-println
+(core/defn my-println
   [x]
   (. (. System out) (println x)))
 
-(defn my-apply
+(core/defn my-apply
   "Applies fn f to the argument list formed by prepending intervening arguments to args."
   {:added "1.0"
    :static true}
@@ -92,11 +98,11 @@
 
    (. f (applyTo (cons a (cons b (cons c (cons d (spread args)))))))))
 
-(defn set-eval
+(core/defn set-eval
   []
   (alter-var-root #'eval (constantly #'my-eval)))
 
-(defn set-apply
+(core/defn set-apply
   []
   (alter-var-root
     #'apply
@@ -123,9 +129,17 @@
 
   nil)
 
-(defn -main
+(core/defn -main
   [& args]
   #_(when (not (= (count args) 1))
     (println "Provide a source file please")
     (System/exit 1))
-  (println "Hello, sailor!"))
+  (println "Go:") (flush)
+  (let [r (read)
+        form `(do (ns tamura.read-code
+                    (:require [tamura.core :refer :all]
+                              [tamura.macros :refer :all]))
+                  ~r)]
+    ;; (println (macroexpand form))
+    (eval r)
+    ))

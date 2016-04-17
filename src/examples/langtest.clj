@@ -1,21 +1,16 @@
 (ns examples.langtest
   {:lang :tamura}
-  (:require [tamura.core :as t]))
+  (:require [tamura.core :as t]
+            [tamura.macros :refer :all]))
 
 ;; (t/def x 1)
 
 (def x 1)
 
+;; (t/defn y [x] (+ x x))
+
 (defn -main
   [& args]
-
-  (t/set-apply)
-
-  (print "gif me: ") (flush)
-  (let [input (read-line)
-        num (Integer. input)]
-    (println (* num num)))
-
-  ;; (println (* (+ x x) (+ x x)))
-  ;; (println s)
+  ;; (println (y))
+  (println x)
   )
