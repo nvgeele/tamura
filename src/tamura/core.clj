@@ -57,6 +57,7 @@
     obj))
 
 (core/defn update-subscribers
+(core/defn- update-subscribers
   [subscribers tick value]
   (doseq [sub subscribers]
     (update sub tick value)))
