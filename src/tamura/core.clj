@@ -5,6 +5,7 @@
              :refer [>! <! >!! <!! go buffer close! thread alts! alts!! timeout go-loop]]
             [clojure.core.match :refer [match]]
             [clojure.edn :as edn]
+            [clojure.string :refer [upper-case]]
             [potemkin :as p]
             [tamura.macros :as macros]
             [tamura.values :as v]
@@ -151,6 +152,7 @@
   []
   (str (java.util.UUID/randomUUID)))
 
+;; TODO: phase2 of multiclock reactive programming (detect when construction is done)
 (core/defn make-coordinator
   []
   (let [in (chan)]
@@ -169,16 +171,18 @@
     (Coordinator. in)))
 
 ;; nodes are semi-dynamic; subscribers can be added, but inputs not
-;; TODO: handle initial value thing
 
+;; value is wrapped in a map once we receive a value.
+;; This way, during propagation, we know if the node is initialised or not.
+;; All source nodes in a DAG *must* receive at least one value before anything meaningful can happen really.
 (core/defn make-source-node
   []
   (let [in (chan)
         id (uuid)]
     (go-loop [msg (<!! in)
               subs []
-              value nil]
-      (println (str "source ontvangen: " msg)) (flush)
+              value false]
+      (println (str "source ontvangen: " msg))
       (match msg
              {:subscribe subscriber}
              (recur (<!! in) (cons subscriber subs) value)
@@ -188,13 +192,14 @@
                    (>!! sub {:changed? true
                              :value new-value
                              :origin id}))
-                 (recur (<!! in) subs new-value))
+                 (recur (<!! in) subs {:v new-value}))
 
              {:destination _}
-             (do (doseq [sub subs]
-                   (>!! sub {:changed? false
-                             :value value
-                             :origin id}))
+             (do (when value
+                   (doseq [sub subs]
+                     (>!! sub {:changed? false
+                               :value (:v value)
+                               :origin id})))
                  (recur (<!! in) subs value))
 
              ;; TODO: error?
@@ -209,9 +214,19 @@
       (f (first l)) true
       :else (recur (rest l)))))
 
+(defmacro node-subscribe
+  [source channel]
+  `(>!! (:sub-chan ~source) {:subscribe ~channel}))
+
 ;; input nodes = the actual node records
 ;; inputs = input channels
 ;; subscribers = atom with list of subscriber channels
+
+;; If the value of the go-loop is false, and messages are received, then they will all be changed.
+;; Think about it, as source nodes do not propagate unless they are initialised, all sources their first
+;; message will have {:changed? true}. Thus the first messages to arrive at a regular node will all have
+;; {:changed true}. These are then propagated further and QED and whatnot.
+;; As a result, we do not need to wrap values as we do need to do with sources.
 (core/defn make-node
   [input-nodes action]
   (let [id (uuid)
@@ -219,14 +234,14 @@
         subscribers (atom [])
         inputs (for [node input-nodes]
                  (let [c (chan)]
-                   (>!! (:sub-chan node) {:subscribe c})
+                   (node-subscribe node c)
                    c))]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
     (go-loop [msgs (map <!! inputs)
               value nil]
-      (println (str "node heeft inputs ontvangen: " msgs)) (flush)
+      (println (str "node heeft inputs ontvangen: " msgs))
       (let [[changed? v]
             (if (ormap :changed? msgs)
               [true (apply action (map :value msgs))]
@@ -242,9 +257,11 @@
   (let [c (:in (make-coordinator))
         s1 (make-source-node)
         s2 (make-source-node)
-        p (make-node [s1] (comp println str))]
+        p1 (make-node [s1 s2] (comp upper-case str))
+        p2 (make-node [p1] println)]
     (>!! c {:new-source (:in s1)})
     (>!! c {:new-source (:in s2)})
     (>!! c {:destination (:id s1) :value 'kaka})
     (>!! c {:destination (:id s2) :value 'pipi})
+    (Thread/sleep 3000)
     (println "Done")))
