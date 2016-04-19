@@ -1,5 +1,9 @@
 (ns tamura.core
   (:require [clojure.core :as core]
+            [clojure.core.async
+             :as a
+             :refer [>! <! >!! <!! go buffer close! thread alts! alts!! timeout go-loop]]
+            [clojure.core.match :refer [match]]
             [clojure.edn :as edn]
             [potemkin :as p]
             [tamura.macros :as macros]
@@ -14,9 +18,9 @@
    defn
    defsig]
 
-  [tamura.funcs
+  #_[tamura.funcs
 
-   ;; map
+   map
 
    ])
 
@@ -131,9 +135,140 @@
       (map f arg)
       (throw (Exception. "Argument for lifted function should be an event stream")))))
 
+(def *nodes* [])
+(def *input-nodes* [])
+(def *leaf-nodes* [])
+(def *nodes-sorted* [])
+
+;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
+;; each actor counts how many updates it receives, if updates = parents, then proceed
+
+(core/defn uuid [] (str (java.util.UUID/randomUUID)))
+
+(def buffer-size 32)
+
+(defrecord Coordinator [in])
+(defrecord Node [sub-chan id source?])
+(defrecord Source [in sub-chan id source?])                 ;; isa Node
+
+;; (defmacro chan [] `(a/chan buffer-size))
+(core/defn chan
+  ([] (a/chan buffer-size))
+  ([size] (a/chan size)))
+
+(core/defn make-coordinator
+  []
+  (let [in (chan)]
+    (go-loop [sources []])
+
+    (Coordinator. in)))
+
+;; nodes are semi-dynamic; subscribers can be added, but inputs not
+;; TODO: handle initial value thing
+
+(core/defn make-source-node
+  []
+  (let [in (chan)
+        id (uuid)]
+    (go-loop [msg (<!! in)
+              subs []
+              value nil]
+      (println (str "source ontvangen: " msg)) (flush)
+      (match msg
+             {:subscribe subscriber}
+             (recur (<!! in) (cons subscriber subs) value)
+
+             {:destination id :value new-value}
+             (do (doseq [sub subs]
+                   (>!! sub {:changed? true
+                             :value new-value
+                             :origin id}))
+                 (recur (<!! in) subs new-value))
+
+             {:destination _}
+             (do (doseq [sub subs]
+                   (>!! (:in sub) {:changed? false
+                                   :value value
+                                   :origin id}))
+                 (recur (<!! in) subs value))
+
+             :else
+             ;; TODO: error
+             (do (println "Source did not know what to do")
+                 (recur (<!! in) subs value))))
+    (Source. in in id true)))
+
+(core/defn ormap
+  [f lst]
+  (loop [l lst]
+    (cond
+      (empty? l) false
+      (f (first l)) true
+      :else (recur (rest l)))))
+
+;; input nodes = the actual node records
+;; inputs = input channels
+;; subscribers = atom with list of subscriber channels
+(core/defn make-node
+  [input-nodes action]
+  (let [id (uuid)
+        sub-chan (chan)
+        subscribers (atom [])
+        inputs (for [node input-nodes]
+                 (let [c (chan)]
+                   (>!! (:sub-chan node) {:subscribe c})
+                   c))]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msgs (map <!! inputs)
+              value nil]
+      (println (str "node heeft inputs ontvangen: " msgs)) (flush)
+      (let [[changed? v]
+            (if (ormap :changed? msgs)
+              [true (apply action (map :value msgs))]
+              [false value])]
+        (doseq [sub @subscribers]
+          (>!! sub {:changed? changed? :value v :from id}))
+        (recur (map <!! inputs) v)))
+    (Node. sub-chan id false)))
+
 (core/defn -main
   [& args]
-  (let [pool (JedisPool. "localhost")
+  (println "") (println "") (println "")
+  (let [s1 (make-source-node)
+        s2 (make-source-node)
+        p (make-node [s1] (comp println str))]
+    (>!! (:in s1) {:destination (:id s1) :value 'kaka})
+    (>!! (:in s2) {:destination (:id s2) :value 'prot})
+    (Thread/sleep 3000)
+    (println "Done"))
+  #_(let [a (atom 20)]
+    (swap! a - 100)
+    (println @a))
+  #_(let [c (chan)]
+    (go (<! c)
+        (println "I'm parked!"))
+    (println "Nothing sent, waiting...")
+    (print "3...") (flush) (Thread/sleep 1000)
+    (print "2...") (flush) (Thread/sleep 1000)
+    (println "1...") (flush) (Thread/sleep 1000))
+  #_(let [chans (repeatedly 5 #(chan))]
+    (doseq [c chans]
+      (>!! c "Hallo!"))
+    (println (map <!! chans)))
+  #_(let [c (chan 5)]
+    (go-loop [in (<! c)]
+      (println in)
+      (Thread/sleep 3000)
+      (recur (<! c)))
+    (>!! c "Nils")
+    (println "Nils sent and accepted")
+    (>!! c "Van")
+    (println "Van sent and accepted")
+    (>!! c "Geele")
+    (println "Geele sent and accepted"))
+  #_(let [pool (JedisPool. "localhost")
         conn (.getResource pool)]
     (loop []
       (if-let [v (.rpop conn "bxlqueue")]
