@@ -135,15 +135,9 @@
       (map f arg)
       (throw (Exception. "Argument for lifted function should be an event stream")))))
 
-(def *nodes* [])
-(def *input-nodes* [])
-(def *leaf-nodes* [])
-(def *nodes-sorted* [])
-
 ;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
 ;; each actor counts how many updates it receives, if updates = parents, then proceed
 
-(core/defn uuid [] (str (java.util.UUID/randomUUID)))
 
 (defrecord Coordinator [in])
 (defrecord Node [sub-chan id source?])
@@ -153,6 +147,9 @@
 (defmacro chan
   ([] `(a/chan ~buffer-size))
   ([size] `(a/chan ~size)))
+(core/defn uuid
+  []
+  (str (java.util.UUID/randomUUID)))
 
 (core/defn make-coordinator
   []
@@ -248,54 +245,6 @@
         p (make-node [s1] (comp println str))]
     (>!! c {:new-source (:in s1)})
     (>!! c {:new-source (:in s2)})
-    ;(>!! (:in s1) {:destination (:id s1) :value 'kaka})
-    ;(>!! (:in s2) {:destination (:id s2) :value 'prot})
     (>!! c {:destination (:id s1) :value 'kaka})
     (>!! c {:destination (:id s2) :value 'pipi})
-    (Thread/sleep 3000)
-    (println "Done"))
-  #_(let [a (atom 20)]
-    (swap! a - 100)
-    (println @a))
-  #_(let [c (chan)]
-    (go (<! c)
-        (println "I'm parked!"))
-    (println "Nothing sent, waiting...")
-    (print "3...") (flush) (Thread/sleep 1000)
-    (print "2...") (flush) (Thread/sleep 1000)
-    (println "1...") (flush) (Thread/sleep 1000))
-  #_(let [chans (repeatedly 5 #(chan))]
-    (doseq [c chans]
-      (>!! c "Hallo!"))
-    (println (map <!! chans)))
-  #_(let [c (chan 5)]
-    (go-loop [in (<! c)]
-      (println in)
-      (Thread/sleep 3000)
-      (recur (<! c)))
-    (>!! c "Nils")
-    (println "Nils sent and accepted")
-    (>!! c "Van")
-    (println "Van sent and accepted")
-    (>!! c "Geele")
-    (println "Geele sent and accepted"))
-  #_(let [pool (JedisPool. "localhost")
-        conn (.getResource pool)]
-    (loop []
-      (if-let [v (.rpop conn "bxlqueue")]
-        (println v))
-      (Thread/sleep 100)
-      (recur)))
-  #_(when (not (= (count args) 1))
-      (println "Provide a source file please")
-      (System/exit 1))
-  ;; (println "Go:") (flush)
-  #_(let [r (read)
-          form `(do (ns tamura.read-code
-                      (:require [tamura.core :refer :all]
-                                [tamura.macros :refer :all]))
-                    ~r)]
-      ;; (println (macroexpand form))
-      (eval r))
-
-  )
+    (println "Done")))
