@@ -34,69 +34,6 @@
   (println "Installing tamura...")
   nil)
 
-(defprotocol Reactive
-  (value [this])
-  (subscribe [this reactor])
-  (height [this]))
-
-;; TODO: update height
-(defprotocol Producer
-  (tick [this]))
-
-(defprotocol Reactor
-  (update [this tick value]))
-
-;; TODO: use threadpool?
-(core/defn- make-producer-thread
-  [producer rate]
-  (let [t (Thread.
-            (fn [] (loop []
-                     (tick producer)
-                     (Thread/sleep rate)
-                     (recur))))]
-    (.start t)
-    t))
-
-(core/defn- update-subscribers
-  [subscribers tick value]
-  (doseq [sub subscribers]
-    (update sub tick value)))
-
-;; f should receive boolean, not the value, as the value produced could be false.
-;; therefore f is responsible for swapping the new value in etc.
-(deftype FunctionProducer
-  [f state]
-  Producer
-  (tick [this]
-    (when (f state)
-      (update-subscribers (:subscribers @state) nil (:value @state)))))
-
-;; f *must* produce a new value
-(deftype FunctionReactor
-  [f state]
-  Reactor
-  (update [this tick value]
-    (let [v (f tick value)]
-      (swap! state assoc :value v)
-      (update-subscribers (:subscribers @state) nil (:value @state)))))
-
-(extend-protocol Reactive
-  FunctionProducer
-  (value [this]
-    (:value @(.state this)))
-  (subscribe [this reactor]
-    (swap! (.state this) #(assoc % :subscribers (cons reactor (:subscribers %)))))
-  (height [this]
-    (:height @(.state this)))
-
-  FunctionReactor
-  (value [this]
-    (:value @(.state this)))
-  (subscribe [this reactor]
-    (swap! (.state this) #(assoc % :subscribers (cons reactor (:subscribers %)))))
-  (height [this]
-    (:height @(.state this))))
-
 ;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
 ;; each actor counts how many updates it receives, if updates = parents, then proceed
 
@@ -126,6 +63,7 @@
   []
   (swap! counter inc))
 
+;; TODO: do we still need heights?
 ;; TODO: phase2 of multiclock reactive programming (detect when construction is done)
 (core/defn make-coordinator
   []
