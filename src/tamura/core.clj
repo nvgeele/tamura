@@ -1,8 +1,6 @@
 (ns tamura.core
   (:require [clojure.core :as core]
-            [clojure.core.async
-             :as a
-             :refer [>! <! >!! <!! go buffer close! thread alts! alts!! timeout go-loop]]
+            [clojure.core.async :as a :refer [>!! <!! go go-loop]]
             [clojure.core.match :refer [match]]
             [clojure.edn :as edn]
             [clojure.string :refer [upper-case]]
@@ -102,6 +100,18 @@
 ;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
 ;; each actor counts how many updates it receives, if updates = parents, then proceed
 
+(core/defn ormap
+  [f lst]
+  (loop [l lst]
+    (cond
+      (empty? l) false
+      (f (first l)) true
+      :else (recur (rest l)))))
+
+(defmacro thread
+  [& body]
+  `(doto (Thread. (fn [] ~@body))
+     (.start)))
 
 (defrecord Coordinator [in])
 (defrecord Node [sub-chan id source?])
@@ -170,14 +180,6 @@
              :else (recur (<!! in) subs value)))
     (Source. in in id true)))
 
-(core/defn ormap
-  [f lst]
-  (loop [l lst]
-    (cond
-      (empty? l) false
-      (f (first l)) true
-      :else (recur (rest l)))))
-
 (defmacro node-subscribe
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
@@ -227,14 +229,11 @@
         pool (JedisPool. host)
         conn (.getResource pool)]
     (>!! (:in *coordinator*) {:new-source (:in node)})
-    (doto (Thread.
-            (fn []
-              (loop [v (.rpop conn key)]
-                (when v
-                  (>!! (:in *coordinator*) {:destination id :value (edn/read-string v)}))
-                (Thread/sleep 10)
-                (recur (.rpop conn key)))))
-      (.start))
+    (thread (loop [v (.rpop conn key)]
+              (when v
+                (>!! (:in *coordinator*) {:destination id :value (edn/read-string v)}))
+              (Thread/sleep 10)
+              (recur (.rpop conn key))))
     node))
 
 (def redis make-redis)
