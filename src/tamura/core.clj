@@ -234,34 +234,32 @@
                 (>!! (:in *coordinator*) {:destination id :value (edn/read-string v)}))
               (Thread/sleep 10)
               (recur (.rpop conn key))))
-    node))
+    (v/make-signal node)))
 
 (def redis make-redis)
 
 (core/defn map
   [f arg]
-  (if (v/eventstream? arg)
-    (let [prod (v/value arg)
-          ph (height prod)
-          state (atom {:subscribers [] :value nil :height (inc ph)})
-          mf (fn [tick value] (f value))
-          reactor (new FunctionReactor mf state)]
-      (subscribe prod reactor)
-      (v/make-eventstream reactor))
+  (if (v/signal? arg)
+    (let [source-node (v/value arg)
+          node (make-node [source-node] f)]
+      (v/make-signal node))
     (core/map f arg)))
 
 (core/defn lift
   [f]
   (fn [arg]
-    (if (v/eventstream? arg)
+    (if (v/signal? arg)
       (map f arg)
-      (throw (Exception. "Argument for lifted function should be an event stream")))))
+      (throw (Exception. "Argument for lifted function should be a signal")))))
 
 (core/defn -main
   [& args]
   (println "") (println "") (println "")
   (let [r (make-redis "localhost" "bxlqueue")
-        p (make-node [r] println)]
+        m1 (map inc r)
+        m2 (map inc m1)]
+    ((lift println) m2)
     (println "Done")
     #_(Thread/sleep 10000000))
   #_(let [c (:in (make-coordinator))
