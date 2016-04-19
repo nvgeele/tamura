@@ -44,10 +44,10 @@
  :direction :north
  :timestamp 1237480993}
 
-(defsig input (map parse-message (redis "localhost" "bxlqueue")))
+(t/defsig input (map parse-message (redis "localhost" "bxlqueue")))
 
 ;; TODO: timeout (but something something leasing...)
-(defsig state (reactive-hash {}
+(t/defsig state (reactive-hash {}
                 (fn [msg state]
                   (if-let [previous (get (:user-id msg) state)]
                     (assoc state
@@ -62,11 +62,55 @@
 
 (map println state)
 
-(defsig directions (observe state {}
+(t/defsig directions (observe state {}
                             (fn [new state])
                             (fn [del state])))
 
 (map println directions)
+;;;;;;;;;;;;;;;
+(r-set)
+(signal-for :user-id
+            (->> (zip user-signal (delay user-signal {}))
+                 (apply calculate-direction))
+            merge)
+
+;;;;;;;;;;;;;;;
+
+(t/defsig positions (redis .... :user-id))
+
+(t/defsig new-pos (updated positions))
+
+;; removed = lease expired
+(t/defsig delayed (delay positions))
+
+(t/defsig previous (find (find :user-id new-pos) delayed))
+
+(apply calculate-direction (zip new-pos previous))
+
+
+;;;;;;;;;;;;;;;
+
+;; De niet zo efficiente manier
+
+;; How do we deal with unions on key-ed sets? what if (union #{{:a 1}} #{{:a 2}}) for a set key-ed on :a?
+
+;; We distinguish two types of reactive sets: with keys, and without keys
+;; With keys we accumulate with replacements, without keys we just accumulate
+
+;; zip will zip "matching" elements. If an element has no match, no tuple is produced for that element.
+
+;; What about: REACTIVE MULTISETS
+;; A keyed multiset will be a unique set on its key
+
+(t/defsig positions (redis "localhost" "bxlqueue" :user-id)) ;; #{{:a 3} {:b 3}}
+(t/defsig old-positions (delay positions))                   ;; #{{:a 2} {:b 2}}
+(t/defsig updates (zip positions old-positions))             ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
+(t/defsig directions (map (fn [[new old]]
+                            (calculate-direction (:position new) (:position old)))
+                          updates))                          ;; This is where multisets come into the picture
+(t/defsig direction-count (multiplicities directions))
+(t/defsig max-direction (reduce (fn [l r])))
+(println directions)
 
 ;;;;;;;;;;;;;;;
 
