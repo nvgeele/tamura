@@ -145,16 +145,14 @@
 
 (core/defn uuid [] (str (java.util.UUID/randomUUID)))
 
-(def buffer-size 32)
-
 (defrecord Coordinator [in])
 (defrecord Node [sub-chan id source?])
 (defrecord Source [in sub-chan id source?])                 ;; isa Node
 
-;; (defmacro chan [] `(a/chan buffer-size))
-(core/defn chan
-  ([] (a/chan buffer-size))
-  ([size] (a/chan size)))
+(def buffer-size 32)
+(defmacro chan
+  ([] `(a/chan ~buffer-size))
+  ([size] `(a/chan ~size)))
 
 (core/defn make-coordinator
   []
