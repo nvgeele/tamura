@@ -7,7 +7,7 @@
 
 (defmacro def
   [name value]
-  (log/info "Yay, def!")
+  (log/debug "Tamura def macro used")
   `(def ~name (let [v# ~value]
                 (if (v/signal? v#)
                   (throw (Exception. "Can not assign signals using `def'!"))
@@ -15,7 +15,7 @@
 
 (defmacro defsig
   [name value]
-  (log/info "Yay, defsig!")
+  (log/debug "Tamura defsig macro used")
   `(def ~name (let [v# ~value]
                 (if (v/signal? v#)
                   v#
@@ -23,5 +23,5 @@
 
 (defmacro defn
   [name & args]
-  (log/info "Yay, defn!")
+  (log/debug "Tamura defn macro used")
   `(tamura.macros/def ~name (fn ~@args)))

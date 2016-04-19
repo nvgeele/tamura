@@ -6,6 +6,7 @@
             [clojure.core.match :refer [match]]
             [clojure.edn :as edn]
             [clojure.string :refer [upper-case]]
+            [clojure.tools.logging :as log]
             [potemkin :as p]
             [tamura.macros :as macros]
             [tamura.values :as v]
@@ -148,9 +149,10 @@
 (defmacro chan
   ([] `(a/chan ~buffer-size))
   ([size] `(a/chan ~size)))
-(core/defn uuid
+(def counter (atom 0))
+(core/defn new-id!
   []
-  (str (java.util.UUID/randomUUID)))
+  (swap! counter inc))
 
 ;; TODO: phase2 of multiclock reactive programming (detect when construction is done)
 (core/defn make-coordinator
@@ -178,11 +180,11 @@
 (core/defn make-source-node
   []
   (let [in (chan)
-        id (uuid)]
+        id (new-id!)]
     (go-loop [msg (<!! in)
               subs []
               value false]
-      (println (str "source ontvangen: " msg))
+      (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
              {:subscribe subscriber}
              (recur (<!! in) (cons subscriber subs) value)
@@ -229,7 +231,7 @@
 ;; As a result, we do not need to wrap values as we do need to do with sources.
 (core/defn make-node
   [input-nodes action]
-  (let [id (uuid)
+  (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
         inputs (for [node input-nodes]
@@ -241,7 +243,7 @@
       (recur (<!! sub-chan)))
     (go-loop [msgs (map <!! inputs)
               value nil]
-      (println (str "node heeft inputs ontvangen: " msgs))
+      (log/debug (str "node " id " has received: " (seq msgs)))
       (let [[changed? v]
             (if (ormap :changed? msgs)
               [true (apply action (map :value msgs))]
