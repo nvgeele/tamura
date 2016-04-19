@@ -159,8 +159,18 @@
 (core/defn make-coordinator
   []
   (let [in (chan)]
-    (go-loop [sources []])
+    (go-loop [msg (<!! in)
+              sources []]
+      (match msg
+             {:new-source source-chan}
+             (recur (<!! in) (cons source-chan sources))
 
+             {:destination id :value value}
+             (do (doseq [source sources]
+                   (>!! source msg))
+                 (recur (<!! in) sources))
+
+             :else (recur (<!! in) sources)))
     (Coordinator. in)))
 
 ;; nodes are semi-dynamic; subscribers can be added, but inputs not
@@ -187,15 +197,13 @@
 
              {:destination _}
              (do (doseq [sub subs]
-                   (>!! (:in sub) {:changed? false
-                                   :value value
-                                   :origin id}))
+                   (>!! sub {:changed? false
+                             :value value
+                             :origin id}))
                  (recur (<!! in) subs value))
 
-             :else
-             ;; TODO: error
-             (do (println "Source did not know what to do")
-                 (recur (<!! in) subs value))))
+             ;; TODO: error?
+             :else (recur (<!! in) subs value)))
     (Source. in in id true)))
 
 (core/defn ormap
@@ -236,11 +244,16 @@
 (core/defn -main
   [& args]
   (println "") (println "") (println "")
-  (let [s1 (make-source-node)
+  (let [c (:in (make-coordinator))
+        s1 (make-source-node)
         s2 (make-source-node)
         p (make-node [s1] (comp println str))]
-    (>!! (:in s1) {:destination (:id s1) :value 'kaka})
-    (>!! (:in s2) {:destination (:id s2) :value 'prot})
+    (>!! c {:new-source (:in s1)})
+    (>!! c {:new-source (:in s2)})
+    ;(>!! (:in s1) {:destination (:id s1) :value 'kaka})
+    ;(>!! (:in s2) {:destination (:id s2) :value 'prot})
+    (>!! c {:destination (:id s1) :value 'kaka})
+    (>!! c {:destination (:id s2) :value 'pipi})
     (Thread/sleep 3000)
     (println "Done"))
   #_(let [a (atom 20)]
