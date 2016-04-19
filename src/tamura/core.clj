@@ -99,44 +99,6 @@
   (height [this]
     (:height @(.state this))))
 
-(core/defn make-redis
-  [host key]
-  (let [pool (JedisPool. host)
-        state {:pool pool
-               :conn (.getResource pool)
-               :key key
-               :subscribers []
-               :value nil
-               :height 0}
-        f (fn [state]
-            (when-let [v (.rpop (:conn @state) (:key @state))]
-              (swap! state assoc :value (edn/read-string v))
-              (update-subscribers (:subscribers @state) nil (:value @state))))
-        producer (new FunctionProducer f (atom state))]
-    (make-producer-thread producer 10)
-    (v/make-eventstream producer)))
-
-(def redis make-redis)
-
-(core/defn map
-  [f arg]
-  (if (v/eventstream? arg)
-    (let [prod (v/value arg)
-          ph (height prod)
-          state (atom {:subscribers [] :value nil :height (inc ph)})
-          mf (fn [tick value] (f value))
-          reactor (new FunctionReactor mf state)]
-      (subscribe prod reactor)
-      (v/make-eventstream reactor))
-    (core/map f arg)))
-
-(core/defn lift
-  [f]
-  (fn [arg]
-    (if (v/eventstream? arg)
-      (map f arg)
-      (throw (Exception. "Argument for lifted function should be an event stream")))))
-
 ;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
 ;; each actor counts how many updates it receives, if updates = parents, then proceed
 
@@ -229,6 +191,8 @@
 ;; message will have {:changed? true}. Thus the first messages to arrive at a regular node will all have
 ;; {:changed true}. These are then propagated further and QED and whatnot.
 ;; As a result, we do not need to wrap values as we do need to do with sources.
+;; Unless... maybe, if sources already start submitting when we are still constructing...
+;; TODO: construction finish detection
 (core/defn make-node
   [input-nodes action]
   (let [id (new-id!)
@@ -253,10 +217,55 @@
         (recur (map <!! inputs) v)))
     (Node. sub-chan id false)))
 
+(def ^:dynamic *coordinator* (make-coordinator))
+
+;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
+(core/defn make-redis
+  [host key]
+  (let [node (make-source-node)
+        id (:id node)
+        pool (JedisPool. host)
+        conn (.getResource pool)]
+    (>!! (:in *coordinator*) {:new-source (:in node)})
+    (doto (Thread.
+            (fn []
+              (loop [v (.rpop conn key)]
+                (when v
+                  (>!! (:in *coordinator*) {:destination id :value (edn/read-string v)}))
+                (Thread/sleep 10)
+                (recur (.rpop conn key)))))
+      (.start))
+    node))
+
+(def redis make-redis)
+
+(core/defn map
+  [f arg]
+  (if (v/eventstream? arg)
+    (let [prod (v/value arg)
+          ph (height prod)
+          state (atom {:subscribers [] :value nil :height (inc ph)})
+          mf (fn [tick value] (f value))
+          reactor (new FunctionReactor mf state)]
+      (subscribe prod reactor)
+      (v/make-eventstream reactor))
+    (core/map f arg)))
+
+(core/defn lift
+  [f]
+  (fn [arg]
+    (if (v/eventstream? arg)
+      (map f arg)
+      (throw (Exception. "Argument for lifted function should be an event stream")))))
+
 (core/defn -main
   [& args]
   (println "") (println "") (println "")
-  (let [c (:in (make-coordinator))
+  (let [r (make-redis "localhost" "bxlqueue")
+        p (make-node [r] println)]
+    (println "Done")
+    #_(Thread/sleep 10000000))
+  #_(let [c (:in (make-coordinator))
         s1 (make-source-node)
         s2 (make-source-node)
         p1 (make-node [s1 s2] (comp upper-case str))
