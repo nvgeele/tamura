@@ -149,6 +149,7 @@
 ;; value is wrapped in a map once we receive a value.
 ;; This way, during propagation, we know if the node is initialised or not.
 ;; All source nodes in a DAG *must* receive at least one value before anything meaningful can happen really.
+;; TODO: change so id is tested explicitely and test if bugs still occur
 (core/defn make-source-node
   []
   (let [in (chan)
@@ -246,6 +247,15 @@
       (v/make-signal node))
     (core/map f arg)))
 
+(core/defn map2
+  [f arg1 arg2]
+  (if (and (v/signal? arg1) (v/signal? arg2))
+    (let [l (v/value arg1)
+          r (v/value arg2)
+          node (make-node [l r] f)]
+      (v/make-signal node))
+    (throw (Exception. "map2 takes 2 signals"))))
+
 (core/defn lift
   [f]
   (fn [arg]
@@ -258,18 +268,10 @@
   (println "") (println "") (println "")
   (let [r (make-redis "localhost" "bxlqueue")
         m1 (map inc r)
-        m2 (map inc m1)]
-    ((lift println) m2)
-    (println "Done")
-    #_(Thread/sleep 10000000))
-  #_(let [c (:in (make-coordinator))
-        s1 (make-source-node)
-        s2 (make-source-node)
-        p1 (make-node [s1 s2] (comp upper-case str))
-        p2 (make-node [p1] println)]
-    (>!! c {:new-source (:in s1)})
-    (>!! c {:new-source (:in s2)})
-    (>!! c {:destination (:id s1) :value 'kaka})
-    (>!! c {:destination (:id s2) :value 'pipi})
-    (Thread/sleep 3000)
-    (println "Done")))
+        m2 (map2 + r m1)]
+    ((lift println) m2))
+  (let [r1 (make-redis "localhost" "lq")
+        r2 (make-redis "localhost" "rq")]
+    ((lift println) (map2 + r1 r2)))
+  (println "Done")
+  )
