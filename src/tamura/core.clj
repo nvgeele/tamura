@@ -64,7 +64,7 @@
   (swap! counter inc))
 
 ;; TODO: do we still need heights?
-;; TODO: phase2 of multiclock reactive programming (detect when construction is done)
+;; TODO: phase2 of multiclock reactive programming (detect when construction is done) (or cheat and Thread/sleep)
 (core/defn make-coordinator
   []
   (let [in (chan)]
@@ -158,6 +158,40 @@
         (recur (map <!! inputs) v)))
     (Node. sub-chan id false)))
 
+;; TODO: more generic approach to node construction
+;; TODO: filter should *always* propagate a value...
+;; TODO: think about intialisation
+(core/defn make-filter-node
+  [input-node predicate]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              pass? false
+              value nil]
+      (log/debug (str "filter-node " id " has received: " msg))
+      (cond (:changed? msg) (let [pass? (predicate (:value msg))]
+                              (when pass?
+                                (doseq [sub @subscribers]
+                                  (>!! sub {:changed? true :value (:value msg) :from id})))
+                              (recur (<!! input) pass? value))
+            pass? (do (doseq [sub @subscribers]
+                        (>!! sub {:changed? false :value value :from id}))
+                      (recur (<!! input) pass? value))
+            :else (recur (<!! input) pass? value)))
+    (Node. sub-chan id false)))
+
+;; TODO: for generic node construction
+(defmacro defnode
+  [bindings & body]
+  `nil)
+
 (def ^:dynamic *coordinator* (make-coordinator))
 
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
@@ -176,6 +210,14 @@
     (v/make-signal node)))
 
 (def redis make-redis)
+
+(core/defn filter
+  [f arg]
+  (if (v/signal? arg)
+    (let [source-node (v/value arg)
+          node (make-filter-node source-node f)]
+      (v/make-signal node))
+    (core/filter f arg)))
 
 (core/defn map
   [f arg]
@@ -205,11 +247,11 @@
   [& args]
   (println "") (println "") (println "")
   (let [r (make-redis "localhost" "bxlqueue")
-        m1 (map inc r)
-        m2 (map2 + r m1)]
+        f (filter even? r)
+        m1 (map inc f)
+        m2 (map2 + f m1)]
     ((lift println) m2))
   (let [r1 (make-redis "localhost" "lq")
         r2 (make-redis "localhost" "rq")]
     ((lift println) (map2 + r1 r2)))
-  (println "Done")
-  )
+  (println "Done"))
