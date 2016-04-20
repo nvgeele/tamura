@@ -12,7 +12,8 @@
                                                     com.sun.jmdk/jmxtools
                                                     com.sun.jmx/jmxri]]
                  [potemkin "0.4.3"]
-                 [redis.clients/jedis "2.8.0"]]
+                 [redis.clients/jedis "2.8.0"]
+                 [org.clojars.achim/multiset "0.1.0"]]
 
   ;:injections [(require 'tamura.core)
   ;             (tamura.core/install)]
