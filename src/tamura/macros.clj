@@ -3,8 +3,6 @@
             [clojure.tools.logging :as log]
             [tamura.values :as v]))
 
-;; TODO: letsig ?
-
 (defmacro def
   [name value]
   (log/debug "Tamura def macro used")
@@ -13,6 +11,8 @@
                   (throw (Exception. "Can not assign signals using `def'!"))
                   v#))))
 
+;; TODO: letsig ?
+;; TODO: Maybe do not expand with def, but register node in an environment?
 (defmacro defsig
   [name value]
   (log/debug "Tamura defsig macro used")

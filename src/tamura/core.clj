@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [clojure.string :refer [upper-case]]
             [clojure.tools.logging :as log]
+            [multiset.core :as ms]
             [potemkin :as p]
             [tamura.macros :as macros]
             [tamura.values :as v]
@@ -37,6 +38,29 @@
 ;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
 ;; each actor counts how many updates it receives, if updates = parents, then proceed
 
+(defmacro ^{:private true} assert-args
+  [& pairs]
+  `(do (when-not ~(first pairs)
+         (throw (IllegalArgumentException.
+                  (str (first ~'&form) " requires " ~(second pairs) " in " ~'*ns* ":" (:line (meta ~'&form))))))
+       ~(let [more (nnext pairs)]
+          (when more
+            (list* `assert-args more)))))
+
+(defmacro when-let*
+  "bindings => [bindingform test ...]"
+  [bindings & body]
+  (assert-args
+    (vector? bindings) "a vector for its binding"
+    (>= (count bindings) 2) "2 or more forms in binding vector"
+    (even? (count bindings)) "even amount of bindings")
+  (let [form (bindings 0) tst (bindings 1)]
+    `(let [temp# ~tst]
+       (when temp#
+         (let [~form temp#
+               ~@(rest (rest bindings))]
+           ~@body)))))
+
 (core/defn ormap
   [f lst]
   (loop [l lst]
@@ -50,9 +74,11 @@
   `(doto (Thread. (fn [] ~@body))
      (.start)))
 
+;; TODO: define some sinks
 (defrecord Coordinator [in])
 (defrecord Node [sub-chan id source?])
 (defrecord Source [in sub-chan id source?])                 ;; isa Node
+(defrecord Sink [in id source?])                            ;; isa Node
 
 (def buffer-size 32)
 (defmacro chan
@@ -194,19 +220,43 @@
 
 (def ^:dynamic *coordinator* (make-coordinator))
 
+(core/defn kms-get-key
+  [set key val]
+  (let [r (filter #(= (get % key) val) set)]
+    (if r
+      (first r)
+      false)))
+
+(core/defn kms-insert
+  [set key value]
+  (log/debug "kms-insert")
+  (log/debug (get value key))
+  (log/debug (kms-get-key set key (get value key)))
+
+  (if-let [e (kms-get-key set key (get value key))]
+    (conj (disj set e) value)
+    (conj set value)))
+
+;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
+;; TODO: something something polling time
 (core/defn make-redis
-  [host key]
+  [host queue & {:keys [key] :or {key false}}]
   (let [node (make-source-node)
         id (:id node)
         pool (JedisPool. host)
         conn (.getResource pool)]
     (>!! (:in *coordinator*) {:new-source (:in node)})
-    (thread (loop [v (.rpop conn key)]
-              (when v
-                (>!! (:in *coordinator*) {:destination id :value (edn/read-string v)}))
+    (thread (loop [set (ms/multiset)]
               (Thread/sleep 10)
-              (recur (.rpop conn key))))
+              (if-let [v (.rpop conn queue)]
+                (let [parsed (edn/read-string v)
+                      new-set (if key
+                                (kms-insert set key parsed)
+                                (conj set parsed))]
+                  (>!! (:in *coordinator*) {:destination id :value new-set})
+                  (recur new-set))
+                (recur set))))
     (v/make-signal node)))
 
 (def redis make-redis)
@@ -219,6 +269,7 @@
       (v/make-signal node))
     (core/filter f arg)))
 
+;; For incremental etc: keep dict of input => output for elements
 (core/defn map
   [f arg]
   (if (v/signal? arg)
@@ -246,12 +297,18 @@
 (core/defn -main
   [& args]
   (println "") (println "") (println "")
-  (let [r (make-redis "localhost" "bxlqueue")
+
+  (let [r (make-redis "localhost" "bxlqueue" :key :user-id)]
+    ((lift println) r))
+
+  #_(let [r (make-redis "localhost" "bxlqueue")
         f (filter even? r)
         m1 (map inc f)
         m2 (map2 + f m1)]
     ((lift println) m2))
-  (let [r1 (make-redis "localhost" "lq")
+
+  #_(let [r1 (make-redis "localhost" "lq")
         r2 (make-redis "localhost" "rq")]
     ((lift println) (map2 + r1 r2)))
+
   (println "Done"))
