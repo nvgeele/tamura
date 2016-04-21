@@ -1,92 +1,92 @@
 (ns examples.bxl-direct
   (:require [tamura.core :as t]))
 
-;; No implicit lifting!
+(comment
+  ;; No implicit lifting!
 
-(t/defsig redis-input (t/redis "localhost" "bxlqueue"))
-(t/defsig input (map (fn [msg] msg) redis-input))
+  (t/defsig redis-input (t/redis "localhost" "bxlqueue"))
+  (t/defsig input (map (fn [msg] msg) redis-input))
 
-(->> (zip input (latch input :user-id))                     ;; GLITCH WARNING!!!
-     (filter (fn [cur prev] (not (timeout? cur prev))))
-     (map (fn [cur prev] (direction (:position cur) (:position prev))))
+  (->> (zip input (latch input :user-id))                   ;; GLITCH WARNING!!!
+       (filter (fn [cur prev] (not (timeout? cur prev))))
+       (map (fn [cur prev] (direction (:position cur) (:position prev))))
 
-     ;; (throttle 1)
+       ;; (throttle 1)
 
-     ;; MAGIC!
+       ;; MAGIC!
 
-     count-by-value
-     max)
+       count-by-value
+       max)
 
-;; (previous stream initial)
-;; stream | (previous stream initial)
-;; v1     | initial
-;; v2     | v1
-;; v3     | v2
+  ;; (previous stream initial)
+  ;; stream | (previous stream initial)
+  ;; v1     | initial
+  ;; v2     | v1
+  ;; v3     | v2
 
-;; (buffer stream trigger)
+  ;; (buffer stream trigger)
 
-;; (buffer stream size)
+  ;; (buffer stream size)
 
-;; (throttle stream time)
+  ;; (throttle stream time)
 
-;; Session windowing = (buffer stream (throttle stream timeout))
+  ;; Session windowing = (buffer stream (throttle stream timeout))
 
-;;;;;;;;;;;;;;;
+  ;;;;;;;;;;;;;;;
 
-;; Update messages:
-{:user-id 123
- :position {:lat 0 :lon 0}
- :timestamp 1233412334}
+  ;; Update messages:
+  {:user-id   123
+   :position  {:lat 0 :lon 0}
+   :timestamp 1233412334}
 
-;; State objects:
-{:user-id 123
- :position {:lat 0 :lon 0}
- :direction :north
- :timestamp 1237480993}
+  ;; State objects:
+  {:user-id   123
+   :position  {:lat 0 :lon 0}
+   :direction :north
+   :timestamp 1237480993}
 
-(t/defsig input (map parse-message (redis "localhost" "bxlqueue")))
+  (t/defsig input (map parse-message (redis "localhost" "bxlqueue")))
 
-;; TODO: timeout (but something something leasing...)
-(t/defsig state (reactive-hash {}
-                (fn [msg state]
-                  (if-let [previous (get (:user-id msg) state)]
-                    (assoc state
-                      (:user-id msg)
-                      (assoc msg
-                        :direction
-                        (calculate-direction (:direction msg) (:direction previous))))
-                    (assoc state
-                      (:user-id msg)
-                      (assoc msg :direction nil))))
-                input))
+  ;; TODO: timeout (but something something leasing...)
+  (t/defsig state (reactive-hash {}
+                                 (fn [msg state]
+                                   (if-let [previous (get (:user-id msg) state)]
+                                     (assoc state
+                                       (:user-id msg)
+                                       (assoc msg
+                                         :direction
+                                         (calculate-direction (:direction msg) (:direction previous))))
+                                     (assoc state
+                                       (:user-id msg)
+                                       (assoc msg :direction nil))))
+                                 input))
 
-(map println state)
+  (map println state)
 
-(t/defsig directions (observe state {}
-                            (fn [new state])
-                            (fn [del state])))
+  (t/defsig directions (observe state {}
+                                (fn [new state])
+                                (fn [del state])))
 
-(map println directions)
-;;;;;;;;;;;;;;;
-(r-set)
-(signal-for :user-id
-            (->> (zip user-signal (delay user-signal {}))
-                 (apply calculate-direction))
-            merge)
+  (map println directions)
+  ;;;;;;;;;;;;;;;
+  (r-set)
+  (signal-for :user-id
+              (->> (zip user-signal (delay user-signal {}))
+                   (apply calculate-direction))
+              merge)
 
-;;;;;;;;;;;;;;;
+  ;;;;;;;;;;;;;;;
 
-(t/defsig positions (redis .... :user-id))
+  (t/defsig positions (redis .... :user-id))
 
-(t/defsig new-pos (updated positions))
+  (t/defsig new-pos (updated positions))
 
-;; removed = lease expired
-(t/defsig delayed (delay positions))
+  ;; removed = lease expired
+  (t/defsig delayed (delay positions))
 
-(t/defsig previous (find (find :user-id new-pos) delayed))
+  (t/defsig previous (find (find :user-id new-pos) delayed))
 
-(apply calculate-direction (zip new-pos previous))
-
+  (apply calculate-direction (zip new-pos previous)))
 
 ;;;;;;;;;;;;;;;
 
@@ -102,16 +102,18 @@
 ;; What about: REACTIVE MULTISETS
 ;; A keyed multiset will be a unique set on its key
 
-(t/defsig positions (redis "localhost" "bxlqueue" :user-id)) ;; #{{:a 3} {:b 3}}
+(t/defsig positions (redis "localhost" "bxlqueue" :key :user-id)) ;; #{{:a 3} {:b 3}}
 (t/defsig old-positions (delay positions))                   ;; #{{:a 2} {:b 2}}
 (t/defsig updates (zip positions old-positions))             ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
 (t/defsig directions (map (fn [[new old]]
                             (calculate-direction (:position new) (:position old)))
                           updates))                          ;; This is where multisets come into the picture
 (t/defsig direction-count (multiplicities directions))
-(t/defsig max-direction (reduce (fn [l r])))
-(println directions)
-
+(t/defsig max-direction (reduce (fn [l r]
+                                  (if (> (first (vals l)) (first (vals r)))
+                                    l
+                                    r))))
+(t/do-apply println max-direction)
 ;;;;;;;;;;;;;;;
 
 (defn -main

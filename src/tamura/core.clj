@@ -220,22 +220,48 @@
 
 (def ^:dynamic *coordinator* (make-coordinator))
 
-(core/defn kms-get-key
+;; TODO: develop this further so operations can detect if there is a multiset or not
+;; (deftype MultiSet [keyed? mset])
+
+;; TODO: accessor functions
+;; TODO: put key in the actual multiset
+(core/defn make-multiset
+  ([] (make-multiset false (ms/multiset)))
+  ([keyed?] (make-multiset keyed? (ms/multiset)))
+  ([keyed? mset] {:type ::multiset
+                  :keyed? keyed?
+                  :mset mset}))
+
+(core/defn multiset?
+  [x]
+  (= ::multiset (:type x)))
+
+(core/defn multiset-keyed?
+  [x]
+  (and (multiset? x)
+       (:keyed? x)))
+
+(core/defn multiset-get-key
   [set key val]
-  (let [r (filter #(= (get % key) val) set)]
-    (if r
-      (first r)
-      false)))
+  (if (multiset-keyed? set)
+    (let [r (filter #(= (get % key) val) (:mset set))]
+      (if r
+        (first r)
+        false))
+    nil))
 
-(core/defn kms-insert
-  [set key value]
-  (log/debug "kms-insert")
-  (log/debug (get value key))
-  (log/debug (kms-get-key set key (get value key)))
-
-  (if-let [e (kms-get-key set key (get value key))]
-    (conj (disj set e) value)
-    (conj set value)))
+(core/defn multiset-insert
+  ([set value]
+   (if (multiset-keyed? set)
+     (throw (Exception. "must provide key when inserting into keyed multiset"))
+     (make-multiset false (conj (:mset set) value))))
+  ([set key value]
+    (if (multiset-keyed? set)
+      (make-multiset true
+                     (if-let [e (multiset-get-key set key (get value key))]
+                       (conj (disj (:mset set) e) value)
+                       (conj (:mset set) value)))
+      (throw (Exception. "can not insert value with key in non-keyed multiset")))))
 
 ;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
@@ -247,13 +273,13 @@
         pool (JedisPool. host)
         conn (.getResource pool)]
     (>!! (:in *coordinator*) {:new-source (:in node)})
-    (thread (loop [set (ms/multiset)]
+    (thread (loop [set (make-multiset (boolean key))]
               (Thread/sleep 10)
               (if-let [v (.rpop conn queue)]
                 (let [parsed (edn/read-string v)
                       new-set (if key
-                                (kms-insert set key parsed)
-                                (conj set parsed))]
+                                (multiset-insert set key parsed)
+                                (multiset-insert set parsed))]
                   (>!! (:in *coordinator*) {:destination id :value new-set})
                   (recur new-set))
                 (recur set))))
@@ -293,6 +319,18 @@
     (if (v/signal? arg)
       (map f arg)
       (throw (Exception. "Argument for lifted function should be a signal")))))
+
+;; TODO: new map
+;; TODO: new filter
+;; TODO: delay
+;; TODO: zip
+;; TODO: multiplicities
+;; TODO: reduce
+;; TODO: do-apply (sink)
+
+;; TODO: buffer
+;; TODO: previous (or is this delay?)
+;; TODO: throttle
 
 (core/defn -main
   [& args]
