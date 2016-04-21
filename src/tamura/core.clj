@@ -224,12 +224,13 @@
 ;; (deftype MultiSet [keyed? mset])
 
 ;; TODO: accessor functions
-;; TODO: put key in the actual multiset
+;; TODO: assert keyed is false or a keyword
 (core/defn make-multiset
   ([] (make-multiset false (ms/multiset)))
   ([keyed?] (make-multiset keyed? (ms/multiset)))
   ([keyed? mset] {:type ::multiset
                   :keyed? keyed?
+                  :key keyed?
                   :mset mset}))
 
 (core/defn multiset?
@@ -241,27 +242,23 @@
   (and (multiset? x)
        (:keyed? x)))
 
-(core/defn multiset-get-key
-  [set key val]
+(core/defn multiset-get
+  [set val]
   (if (multiset-keyed? set)
-    (let [r (filter #(= (get % key) val) (:mset set))]
+    (let [r (filter #(= (get % (:key set)) val) (:mset set))]
       (if r
         (first r)
         false))
     nil))
 
 (core/defn multiset-insert
-  ([set value]
-   (if (multiset-keyed? set)
-     (throw (Exception. "must provide key when inserting into keyed multiset"))
-     (make-multiset false (conj (:mset set) value))))
-  ([set key value]
-    (if (multiset-keyed? set)
-      (make-multiset true
-                     (if-let [e (multiset-get-key set key (get value key))]
-                       (conj (disj (:mset set) e) value)
-                       (conj (:mset set) value)))
-      (throw (Exception. "can not insert value with key in non-keyed multiset")))))
+  [set value]
+  (if (multiset-keyed? set)
+    (make-multiset (:key set)
+                   (if-let [e (multiset-get set (get value (:key set)))]
+                     (conj (disj (:mset set) e) value)
+                     (conj (:mset set) value)))
+    (make-multiset false (conj (:mset set) value))))
 
 ;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
@@ -273,29 +270,22 @@
         pool (JedisPool. host)
         conn (.getResource pool)]
     (>!! (:in *coordinator*) {:new-source (:in node)})
-    (thread (loop [set (make-multiset (boolean key))]
+    (thread (loop [set (make-multiset key)]
               (Thread/sleep 10)
               (if-let [v (.rpop conn queue)]
                 (let [parsed (edn/read-string v)
-                      new-set (if key
-                                (multiset-insert set key parsed)
-                                (multiset-insert set parsed))]
+                      new-set (multiset-insert set parsed)]
                   (>!! (:in *coordinator*) {:destination id :value new-set})
                   (recur new-set))
                 (recur set))))
     (v/make-signal node)))
 
+;; TODO: maybe rename to redis-input
 (def redis make-redis)
 
-(core/defn filter
-  [f arg]
-  (if (v/signal? arg)
-    (let [source-node (v/value arg)
-          node (make-filter-node source-node f)]
-      (v/make-signal node))
-    (core/filter f arg)))
-
 ;; For incremental etc: keep dict of input => output for elements
+;; TODO: what if function changes key?
+;; Possible solution: prevent by comparing in and output, and make keychanges possible by special map function
 (core/defn map
   [f arg]
   (if (v/signal? arg)
