@@ -127,8 +127,16 @@
 ;; idea: sink nodes only can break abstraction of sets
 
 (defn calculate-direction
-  [current previous]
-  (nth [:north :south :west :east] (rand-int 4)))
+  [[cur_lat cur_lon] [pre_lat pre_lon]]
+  (let [y (* (Math/sin (- cur_lon pre_lon)) (Math/cos cur_lat))
+        x (- (* (Math/cos pre_lat) (Math/sin cur_lat))
+             (* (Math/sin pre_lat) (Math/cos cur_lat) (Math/cos (- cur_lon pre_lon))))
+        bearing (Math/atan2 y x)
+        deg (mod (+ (* bearing (/ 180.0 Math/PI)) 360) 360)]
+    (cond (and (>= deg 315) (<= deg 45)) :east
+          (and (>= deg 45) (<= deg 135)) :north
+          (and (>= deg 135) (<= deg 225)) :west
+          :else :south)))
 
 (defmacro print-signal
   [signal]
@@ -137,22 +145,24 @@
 (t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id)) ;; #{{:a 3} {:b 3}}
 ;(print-signal positions)
 
-(t/defsig old-positions (t/delay positions))       ;; #{{:a 2} {:b 2}}
+(t/defsig old-positions (t/delay positions))                ;; #{{:a 2} {:b 2}}
 ;(print-signal old-positions)
 
-(t/defsig updates (t/zip positions old-positions)) ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
+(t/defsig updates (t/zip positions old-positions))          ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
 ;(print-signal updates)
 
 (t/defsig directions (t/map (fn [[new old]]
                               (calculate-direction (:position new) (:position old)))
-                            updates))              ;; This is where multisets come into the picture
+                            updates))                       ;; This is where multisets come into the picture
 ;(print-signal directions)
 
 (t/defsig direction-count (t/multiplicities directions))
 ;(print-signal direction-count)
 
 (t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
-(print-signal max-direction)
+;(print-signal max-direction)
+
+;(print-signal (throttle max-direction 1000))
 
 ;;;;;;;;;;;;;;;
 
