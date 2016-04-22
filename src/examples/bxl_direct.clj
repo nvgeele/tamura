@@ -102,25 +102,32 @@
 ;; What about: REACTIVE MULTISETS
 ;; A keyed multiset will be a unique set on its key
 
-(t/defsig positions (redis "localhost" "bxlqueue" :key :user-id)) ;; #{{:a 3} {:b 3}}
-(t/defsig old-positions (delay positions))                   ;; #{{:a 2} {:b 2}}
-(t/defsig updates (zip positions old-positions))             ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
-(t/defsig directions (map (fn [[new old]]
-                            (calculate-direction (:position new) (:position old)))
-                          updates))                          ;; This is where multisets come into the picture
-(t/defsig direction-count (multiplicities directions))
-(t/defsig max-direction (reduce (fn [l r]
-                                  (if (> (first (vals l)) (first (vals r)))
-                                    l
-                                    r))))
-(t/do-apply println max-direction)
+(defn calculate-direction
+  [current previous]
+  :north)
+
+(t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id)) ;; #{{:a 3} {:b 3}}
+;((t/lift println) positions)
+
+(t/defsig old-positions (t/delay positions))       ;; #{{:a 2} {:b 2}}
+((t/lift println) old-positions)
+
+(comment (t/defsig updates (t/zip positions old-positions)) ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
+
+         (t/defsig directions (t/map (fn [[new old]]
+                                       (calculate-direction (:position new) (:position old)))
+                                     updates))              ;; This is where multisets come into the picture
+
+         (t/defsig direction-count (t/multiplicities directions))
+
+         (t/defsig max-direction (t/reduce (fn [l r]
+                                             (if (> (first (vals l)) (first (vals r)))
+                                               l
+                                               r))))
+
+         (t/do-apply println max-direction))
 ;;;;;;;;;;;;;;;
 
 (defn -main
   [& args]
-  (println c/hello-str))
-
-(comment
-  (constant 5)                                              ;; => constant stream
-  (throttle) (buffer) (combine-latest)
-  )
+  (println "Hello, tomato!"))

@@ -263,6 +263,7 @@
 ;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
 ;; TODO: something something polling time
+;; TODO: error if key not present
 (core/defn make-redis
   [host queue & {:keys [key] :or {key false}}]
   (let [node (make-source-node)
@@ -310,24 +311,138 @@
       (map f arg)
       (throw (Exception. "Argument for lifted function should be a signal")))))
 
-;; TODO: new map
+(core/defn filter
+  [f arg]
+  (if (v/signal? arg)
+    (let [source-node (v/value arg)
+          node (make-filter-node source-node f)]
+      (v/make-signal node))
+    (core/filter f arg)))
+
+;; TODO: new map + lift
 ;; TODO: new filter
-;; TODO: delay
+;; TODO: constant set
+;; TODO: combine-latest
+;; TODO: sample
+
+;; TODO: foldp
+
+;; TODO: delay node
+;; TODO: delay node using foldp?
+(core/defn make-delay-node
+  [input-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              previous-set false
+              delayed-set false]
+      (log/debug (str "delay-node " id " has received: " msg))
+      (let [new-set (:value msg)
+            key (:key new-set)]
+        (cond
+          (and previous-set (:changed? msg))
+          (let [new-element (first (ms/minus (:mset new-set) (:mset previous-set)))
+                delayed-set
+                (if key
+                  (if (multiset-get previous-set (get new-element key))
+                    (multiset-insert delayed-set new-element)
+                    delayed-set)
+                  previous-set)]
+            (doseq [sub @subscribers]
+              (>!! sub {:changed? true :value delayed-set :from id}))
+            (recur (<!! input) new-set delayed-set))
+
+          previous-set
+          (do (doseq [sub @subscribers]
+                (>!! sub {:changed? false :value delayed-set :from id}))
+              (recur (<!! input) new-set delayed-set))
+
+          :else
+          (let [delayed-set (make-multiset key)]
+            (doseq [sub @subscribers]
+              (>!! sub {:changed? (:changed? msg)       ;; should always be true
+                        :value delayed-set
+                        :from id}))
+            (recur (<!! input) new-set delayed-set)))))
+    (Node. sub-chan id false)))
+
+(core/defn delay
+  [arg]
+  (if (v/signal? arg)
+    (let [source-node (v/value arg)
+          node (make-delay-node source-node)]
+      (v/make-signal node))
+    (throw (Exception. "argument to delay should be a signal"))))
+
+(comment
+  ;; How it should be (for keyed sets)
+  #{{:id 1 :v 1}}
+  #{}
+
+  #{{:id 1 :v 1} {:id 2 :v 1}}
+  #{}
+
+  #{{:id 1 :v 2} {:id 2 :v 1}}
+  #{{:id 1 :v 1}}
+
+  ;; How it should be (for none keyed sets)
+  #{a}
+  #{}
+
+  #{a b}
+  #{a}
+
+  #{a b c}
+  #{a b})
+
 ;; TODO: zip
+(core/defn zip
+  [& args]
+  (throw (Exception. "TODO")))
+
 ;; TODO: multiplicities
+(core/defn multiplicities
+  [& args]
+  (throw (Exception. "TODO")))
+
 ;; TODO: reduce
+(core/defn reduce
+  [& args]
+  (throw (Exception. "TODO")))
+
 ;; TODO: do-apply (sink)
+(core/defn do-apply
+  [& args]
+  (throw (Exception. "TODO")))
 
 ;; TODO: buffer
-;; TODO: previous (or is this delay?)
+(core/defn buffer
+  [& args]
+  (throw (Exception. "TODO")))
+
+;; TODO: previous (or is this delay? or do latch instead so we can chain?)
+(core/defn previous
+  [& args]
+  (throw (Exception. "TODO")))
+
 ;; TODO: throttle
+(core/defn throttle
+  [& args]
+  (throw (Exception. "TODO")))
 
 (core/defn -main
   [& args]
   (println "") (println "") (println "")
 
-  (let [r (make-redis "localhost" "bxlqueue" :key :user-id)]
-    ((lift println) r))
+  (let [r (make-redis "localhost" "testqueue")]
+    ((lift println) (delay r)))
 
   #_(let [r (make-redis "localhost" "bxlqueue")
         f (filter even? r)
