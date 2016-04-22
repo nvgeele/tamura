@@ -106,13 +106,20 @@
   [current previous]
   :north)
 
+(defmacro print-signal
+  [signal]
+  `((t/lift #(println (str (quote ~signal) ": " %))) ~signal))
+
 (t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id)) ;; #{{:a 3} {:b 3}}
-;((t/lift println) positions)
+(print-signal positions)
 
 (t/defsig old-positions (t/delay positions))       ;; #{{:a 2} {:b 2}}
-((t/lift println) old-positions)
+(print-signal old-positions)
 
-(comment (t/defsig updates (t/zip positions old-positions)) ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
+(t/defsig updates (t/zip positions old-positions)) ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
+(print-signal updates)
+
+(comment
 
          (t/defsig directions (t/map (fn [[new old]]
                                        (calculate-direction (:position new) (:position old)))

@@ -3,6 +3,7 @@
             [clojure.core.async :as a :refer [>!! <!! go go-loop]]
             [clojure.core.match :refer [match]]
             [clojure.edn :as edn]
+            [clojure.set :as cs]
             [clojure.string :refer [upper-case]]
             [clojure.tools.logging :as log]
             [multiset.core :as ms]
@@ -324,11 +325,8 @@
 ;; TODO: constant set
 ;; TODO: combine-latest
 ;; TODO: sample
-
 ;; TODO: foldp
 
-;; TODO: delay node
-;; TODO: delay node using foldp?
 (core/defn make-delay-node
   [input-node]
   (let [id (new-id!)
@@ -402,10 +400,48 @@
   #{a b c}
   #{a b})
 
-;; TODO: zip
+(core/defn make-zip-node
+  [left-node right-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        inputs (for [node [left-node right-node]]
+                 (let [c (chan)]
+                   (node-subscribe node c)
+                   c))]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msgs (map <!! inputs)
+              zipped false]
+      (log/debug (str "zip-node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [lset (:value (first msgs))
+              rset (:value (second msgs))
+              key (:key lset)
+              lkvals (map #(get % key) (:mset lset))
+              rkvals (map #(get % key) (:mset rset))
+              in-both (cs/union (set lkvals) (set rkvals))
+              pairs (for [kv in-both
+                          :let [lv (multiset-get lset kv)
+                                rv (multiset-get rset kv)]
+                          :when (and rv lv)]
+                      [lv rv])
+              zipped (make-multiset false (apply ms/multiset pairs))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value zipped :from id}))
+          (recur (map <!! inputs) zipped))
+        ;; If nothing is changed, zipped should be initialised
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value zipped :from id}))
+            (recur (map <!! inputs) zipped))))
+    (Node. sub-chan id false)))
+
 (core/defn zip
-  [& args]
-  (throw (Exception. "TODO")))
+  [left right]
+  (if (and (v/signal? left) (v/signal? right))
+    (v/make-signal (make-zip-node (v/value left) (v/value right)))
+    (throw (Exception. "arguments to zip should be signals"))))
 
 ;; TODO: multiplicities
 (core/defn multiplicities
