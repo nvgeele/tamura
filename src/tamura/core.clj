@@ -453,10 +453,38 @@
     (v/make-signal (make-zip-node (v/value left) (v/value right)))
     (throw (Exception. "arguments to zip should be signals"))))
 
-;; TODO: multiplicities
+;; TODO: throw error when input set is keyed?
+(core/defn make-multiplicities-node
+  [input-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              value nil]
+      (log/debug (str "multiplicities-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (:mset (:value msg))
+              multiplicities (ms/multiplicities values)
+              new-set (make-multiset false (apply ms/multiset (seq multiplicities)))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-set :from id}))
+          (recur (<!! input) new-set))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
+
 (core/defn multiplicities
-  [& args]
-  (throw (Exception. "TODO")))
+  [arg]
+  (if (v/signal? arg)
+    (v/make-signal (make-multiplicities-node (v/value arg)))
+    (throw (Exception. "argument to delay should be a signal"))))
 
 ;; TODO: reduce
 (core/defn reduce

@@ -126,31 +126,33 @@
 
 (defn calculate-direction
   [current previous]
-  :north)
+  (nth [:north :south :west :east] (rand-int 4)))
 
 (defmacro print-signal
   [signal]
   `(t/do-apply #(println (str (quote ~signal) ": " %)) ~signal))
 
 (t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id)) ;; #{{:a 3} {:b 3}}
-(print-signal positions)
+;(print-signal positions)
 
 (t/defsig old-positions (t/delay positions))       ;; #{{:a 2} {:b 2}}
-(print-signal old-positions)
+;(print-signal old-positions)
 
 (t/defsig updates (t/zip positions old-positions)) ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
-(print-signal updates)
+;(print-signal updates)
 
 (t/defsig directions (t/map (fn [[new old]]
                               (calculate-direction (:position new) (:position old)))
                             updates))              ;; This is where multisets come into the picture
-(print-signal directions)
+;(print-signal directions)
+
+(t/defsig direction-count (t/multiplicities directions))
+(print-signal direction-count)
 
 (comment
 
 
 
-         (t/defsig direction-count (t/multiplicities directions))
 
          (t/defsig max-direction (t/reduce (fn [l r]
                                              (if (> (first (vals l)) (first (vals r)))
