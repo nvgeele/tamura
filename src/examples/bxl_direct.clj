@@ -162,7 +162,7 @@
 (t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
 ;(print-signal max-direction)
 
-;(print-signal (throttle max-direction 1000))
+(print-signal (throttle max-direction 1000))
 
 ;;;;;;;;;;;;;;;
 

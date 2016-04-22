@@ -127,6 +127,7 @@
     (make-multiset false (conj (:mset set) value))))
 
 ;; TODO: define some sinks
+;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
 (defrecord Coordinator [in])
 (defrecord Node [sub-chan id source?])
 (defrecord Source [in sub-chan id source?])                 ;; isa Node
@@ -239,6 +240,7 @@
             (recur (<!! input) value))))
     (Node. sub-chan id false)))
 
+;; TODO: remove subscribers, it's a sink
 (core/defn make-do-apply-node
   [input-nodes action]
   (let [id (new-id!)
@@ -526,6 +528,49 @@
      (core/reduce f arg)))
   ([f val coll] (core/reduce f val coll)))
 
+;; TODO: the trigger node might cause the whole "the first messages a node receive are changed? true" statement totally FALSE!!!!!!
+(core/defn make-throttle-node
+  [input-node trigger-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)
+        trigger (let [c (chan)]
+                  (node-subscribe trigger-node c)
+                  c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              trig (<!! trigger)]
+      (log/debug (str "throttle-node " id " has received: " msg))
+      (if (:changed? trig)
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? true :value (:value msg) :from id}))
+            (recur (<!! input) (<!! trigger)))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value (:value msg) :from id}))
+            (recur (<!! input) (<!! trigger)))))
+    (Node. sub-chan id false)))
+
+;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
+;; nodes depend on a throttle signal and one or more other signals.
+;; TODO: something something initialisation?
+(core/defn throttle
+  [signal ms]
+  (if (v/signal? signal)
+    (let [source-node (make-source-node)
+          throttle-node (make-throttle-node (v/value signal) source-node)]
+      (>!! (:in *coordinator*) {:new-source (:in source-node)})
+      (threadloop []
+        (>!! (:in *coordinator*) {:destination (:id source-node) :value true})
+        (Thread/sleep ms)
+        (recur))
+      (v/make-signal throttle-node))
+    (throw (Exception. "first argument of throttle must be signal"))))
+
 ;; TODO: buffer
 (core/defn buffer
   [& args]
@@ -533,11 +578,6 @@
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous
-  [& args]
-  (throw (Exception. "TODO")))
-
-;; TODO: throttle
-(core/defn throttle
   [& args]
   (throw (Exception. "TODO")))
 
