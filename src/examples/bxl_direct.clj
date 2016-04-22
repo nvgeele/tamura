@@ -124,6 +124,8 @@
 ;; What about: REACTIVE MULTISETS
 ;; A keyed multiset will be a unique set on its key
 
+;; idea: sink nodes only can break abstraction of sets
+
 (defn calculate-direction
   [current previous]
   (nth [:north :south :west :east] (rand-int 4)))
@@ -147,21 +149,13 @@
 ;(print-signal directions)
 
 (t/defsig direction-count (t/multiplicities directions))
-(print-signal direction-count)
+;(print-signal direction-count)
 
-(comment
+(t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
+(print-signal max-direction)
 
-
-
-
-         (t/defsig max-direction (t/reduce (fn [l r]
-                                             (if (> (first (vals l)) (first (vals r)))
-                                               l
-                                               r))))
-
-         (t/do-apply println max-direction))
 ;;;;;;;;;;;;;;;
 
 (defn -main
   [& args]
-  (println "Hello, tomato!"))
+  (println "Die, potato!"))

@@ -486,10 +486,41 @@
     (v/make-signal (make-multiplicities-node (v/value arg)))
     (throw (Exception. "argument to delay should be a signal"))))
 
-;; TODO: reduce
+;; TODO: reduce with initial value
+(core/defn make-reduce-node
+  [input-node f]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              value nil]
+      (log/debug (str "reduce-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (:mset (:value msg))
+              reduced (if (>= (count values) 2) (reduce f values) nil)
+              new-set (make-multiset false (ms/multiset reduced))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-set :from id}))
+          (recur (<!! input) new-set))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
+
 (core/defn reduce
-  [& args]
-  (throw (Exception. "TODO")))
+  ([f arg]
+   (if (v/signal? arg)
+     (-> (v/value arg)
+         (make-reduce-node f)
+         (v/make-signal))
+     (core/reduce f arg)))
+  ([f val coll] (core/reduce f val coll)))
 
 ;; TODO: buffer
 (core/defn buffer
