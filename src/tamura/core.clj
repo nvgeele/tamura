@@ -351,8 +351,8 @@
           (let [new-element (first (ms/minus (:mset new-set) (:mset previous-set)))
                 delayed-set
                 (if key
-                  (if (multiset-get previous-set (get new-element key))
-                    (multiset-insert delayed-set new-element)
+                  (if-let [existing (multiset-get previous-set (get new-element key))]
+                    (multiset-insert delayed-set existing)
                     delayed-set)
                   previous-set)]
             (doseq [sub @subscribers]
