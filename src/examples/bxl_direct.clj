@@ -90,6 +90,28 @@
 
 ;;;;;;;;;;;;;;;
 
+;; ZIP SEMANTICS
+(comment
+  ;; How it should be (for keyed sets)
+  #{{:id 1 :v 1}}
+  #{}
+
+  #{{:id 1 :v 1} {:id 2 :v 1}}
+  #{}
+
+  #{{:id 1 :v 2} {:id 2 :v 1}}
+  #{{:id 1 :v 1}}
+
+  ;; How it should be (for none keyed sets)
+  #{a}
+  #{}
+
+  #{a b}
+  #{a}
+
+  #{a b c}
+  #{a b})
+
 ;; De niet zo efficiente manier
 
 ;; How do we deal with unions on key-ed sets? what if (union #{{:a 1}} #{{:a 2}}) for a set key-ed on :a?
@@ -108,7 +130,7 @@
 
 (defmacro print-signal
   [signal]
-  `((t/lift #(println (str (quote ~signal) ": " %))) ~signal))
+  `(t/do-apply #(println (str (quote ~signal) ": " %)) ~signal))
 
 (t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id)) ;; #{{:a 3} {:b 3}}
 (print-signal positions)
@@ -119,11 +141,14 @@
 (t/defsig updates (t/zip positions old-positions)) ;; #{[{:a 3} {:a 2}] [{:b 3} {:b 2}]}
 (print-signal updates)
 
+(t/defsig directions (t/map (fn [[new old]]
+                              (calculate-direction (:position new) (:position old)))
+                            updates))              ;; This is where multisets come into the picture
+(print-signal directions)
+
 (comment
 
-         (t/defsig directions (t/map (fn [[new old]]
-                                       (calculate-direction (:position new) (:position old)))
-                                     updates))              ;; This is where multisets come into the picture
+
 
          (t/defsig direction-count (t/multiplicities directions))
 

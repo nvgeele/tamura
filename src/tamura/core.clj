@@ -70,10 +70,57 @@
       (f (first l)) true
       :else (recur (rest l)))))
 
+(core/defn andmap
+  [f lst]
+  (loop [l lst]
+    (cond (empty? l) true
+          (f (first l)) (recur (rest lst))
+          :else false)))
+
 (defmacro thread
   [& body]
   `(doto (Thread. (fn [] ~@body))
      (.start)))
+
+;; TODO: develop this further so operations can detect if there is a multiset or not
+;; (deftype MultiSet [keyed? mset])
+
+;; TODO: accessor functions
+;; TODO: assert keyed is false or a keyword
+(core/defn make-multiset
+  ([] (make-multiset false (ms/multiset)))
+  ([keyed?] (make-multiset keyed? (ms/multiset)))
+  ([keyed? mset] {:type ::multiset
+                  :keyed? keyed?
+                  :key keyed?
+                  :mset mset}))
+
+(core/defn multiset?
+  [x]
+  (= ::multiset (:type x)))
+
+(core/defn multiset-keyed?
+  [x]
+  (and (multiset? x)
+       (:keyed? x)))
+
+(core/defn multiset-get
+  [set val]
+  (if (multiset-keyed? set)
+    (let [r (filter #(= (get % (:key set)) val) (:mset set))]
+      (if r
+        (first r)
+        false))
+    nil))
+
+(core/defn multiset-insert
+  [set value]
+  (if (multiset-keyed? set)
+    (make-multiset (:key set)
+                   (if-let [e (multiset-get set (get value (:key set)))]
+                     (conj (disj (:mset set) e) value)
+                     (conj (:mset set) value)))
+    (make-multiset false (conj (:mset set) value))))
 
 ;; TODO: define some sinks
 (defrecord Coordinator [in])
@@ -161,7 +208,34 @@
 ;; As a result, we do not need to wrap values as we do need to do with sources.
 ;; Unless... maybe, if sources already start submitting when we are still constructing...
 ;; TODO: construction finish detection
-(core/defn make-node
+(core/defn make-map-node
+  [input-node f]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              value nil]
+      (log/debug (str "map-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (:mset (:value msg))
+              mapped (map f values)
+              new-set (make-multiset (:key (:value msg))
+                                     (apply ms/multiset mapped))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-set :from id}))
+          (recur (<!! input) new-set))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
+
+(core/defn make-do-apply-node
   [input-nodes action]
   (let [id (new-id!)
         sub-chan (chan)
@@ -175,7 +249,7 @@
       (recur (<!! sub-chan)))
     (go-loop [msgs (map <!! inputs)
               value nil]
-      (log/debug (str "node " id " has received: " (seq msgs)))
+      (log/debug (str "do-apply-node " id " has received: " (seq msgs)))
       (let [[changed? v]
             (if (ormap :changed? msgs)
               [true (apply action (map :value msgs))]
@@ -221,46 +295,6 @@
 
 (def ^:dynamic *coordinator* (make-coordinator))
 
-;; TODO: develop this further so operations can detect if there is a multiset or not
-;; (deftype MultiSet [keyed? mset])
-
-;; TODO: accessor functions
-;; TODO: assert keyed is false or a keyword
-(core/defn make-multiset
-  ([] (make-multiset false (ms/multiset)))
-  ([keyed?] (make-multiset keyed? (ms/multiset)))
-  ([keyed? mset] {:type ::multiset
-                  :keyed? keyed?
-                  :key keyed?
-                  :mset mset}))
-
-(core/defn multiset?
-  [x]
-  (= ::multiset (:type x)))
-
-(core/defn multiset-keyed?
-  [x]
-  (and (multiset? x)
-       (:keyed? x)))
-
-(core/defn multiset-get
-  [set val]
-  (if (multiset-keyed? set)
-    (let [r (filter #(= (get % (:key set)) val) (:mset set))]
-      (if r
-        (first r)
-        false))
-    nil))
-
-(core/defn multiset-insert
-  [set value]
-  (if (multiset-keyed? set)
-    (make-multiset (:key set)
-                   (if-let [e (multiset-get set (get value (:key set)))]
-                     (conj (disj (:mset set) e) value)
-                     (conj (:mset set) value)))
-    (make-multiset false (conj (:mset set) value))))
-
 ;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
 ;; TODO: something something polling time
@@ -292,18 +326,9 @@
   [f arg]
   (if (v/signal? arg)
     (let [source-node (v/value arg)
-          node (make-node [source-node] f)]
+          node (make-map-node source-node f)]
       (v/make-signal node))
     (core/map f arg)))
-
-(core/defn map2
-  [f arg1 arg2]
-  (if (and (v/signal? arg1) (v/signal? arg2))
-    (let [l (v/value arg1)
-          r (v/value arg2)
-          node (make-node [l r] f)]
-      (v/make-signal node))
-    (throw (Exception. "map2 takes 2 signals"))))
 
 (core/defn lift
   [f]
@@ -311,6 +336,13 @@
     (if (v/signal? arg)
       (map f arg)
       (throw (Exception. "Argument for lifted function should be a signal")))))
+
+;; TODO: make this a sink
+(core/defn do-apply
+  [f arg & args]
+  (if (andmap v/signal? (cons arg args))
+    (v/make-signal (make-do-apply-node (map v/value (cons arg args)) f))
+    (throw (Exception. "do-apply needs to be applied to signals"))))
 
 (core/defn filter
   [f arg]
@@ -320,7 +352,6 @@
       (v/make-signal node))
     (core/filter f arg)))
 
-;; TODO: new map + lift
 ;; TODO: new filter
 ;; TODO: constant set
 ;; TODO: combine-latest
@@ -379,27 +410,6 @@
       (v/make-signal node))
     (throw (Exception. "argument to delay should be a signal"))))
 
-(comment
-  ;; How it should be (for keyed sets)
-  #{{:id 1 :v 1}}
-  #{}
-
-  #{{:id 1 :v 1} {:id 2 :v 1}}
-  #{}
-
-  #{{:id 1 :v 2} {:id 2 :v 1}}
-  #{{:id 1 :v 1}}
-
-  ;; How it should be (for none keyed sets)
-  #{a}
-  #{}
-
-  #{a b}
-  #{a}
-
-  #{a b c}
-  #{a b})
-
 (core/defn make-zip-node
   [left-node right-node]
   (let [id (new-id!)
@@ -450,11 +460,6 @@
 
 ;; TODO: reduce
 (core/defn reduce
-  [& args]
-  (throw (Exception. "TODO")))
-
-;; TODO: do-apply (sink)
-(core/defn do-apply
   [& args]
   (throw (Exception. "TODO")))
 
