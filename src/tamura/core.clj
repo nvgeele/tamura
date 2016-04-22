@@ -82,6 +82,10 @@
   `(doto (Thread. (fn [] ~@body))
      (.start)))
 
+(defmacro threadloop
+  [bindings & body]
+  `(thread (loop ~bindings ~@body)))
+
 ;; TODO: develop this further so operations can detect if there is a multiset or not
 ;; (deftype MultiSet [keyed? mset])
 
@@ -539,9 +543,9 @@
 
 (core/defn -main
   [& args]
-  (println "") (println "") (println "")
+  (comment (println "") (println "") (println ""))
 
-  (let [r (make-redis "localhost" "testqueue")]
+  #_(let [r (make-redis "localhost" "testqueue")]
     ((lift println) (delay r)))
 
   #_(let [r (make-redis "localhost" "bxlqueue")
@@ -554,4 +558,4 @@
         r2 (make-redis "localhost" "rq")]
     ((lift println) (map2 + r1 r2)))
 
-  (println "Done"))
+  #_(println "Done"))
