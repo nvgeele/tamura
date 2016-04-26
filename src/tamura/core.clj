@@ -165,12 +165,8 @@
              :else (recur (<!! in) sources)))
     (Coordinator. in)))
 
-;; nodes are semi-dynamic; subscribers can be added, but inputs not
+;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
 
-;; value is wrapped in a map once we receive a value.
-;; This way, during propagation, we know if the node is initialised or not.
-;; All source nodes in a DAG *must* receive at least one value before anything meaningful can happen really.
-;; TODO: change so id is tested explicitely and test if bugs still occur
 (core/defn make-source-node
   []
   (let [in (chan)
@@ -226,12 +222,10 @@
 ;; inputs = input channels
 ;; subscribers = atom with list of subscriber channels
 
-;; If the value of the go-loop is false, and messages are received, then they will all be changed.
-;; Think about it, as source nodes do not propagate unless they are initialised, all sources their first
-;; message will have {:changed? true}. Thus the first messages to arrive at a regular node will all have
-;; {:changed true}. These are then propagated further and QED and whatnot.
-;; As a result, we do not need to wrap values as we do need to do with sources.
-;; Unless... maybe, if sources already start submitting when we are still constructing...
+;; TODO: instead of checking if one or more inputs have changed, also check that the value for each input is sane (i.e. a multiset)
+;; The rationale is that a node can only produce a :changed? true value iff all its inputs have been true at least once.
+;; Possible solution: an inputs-seen flag of some sorts?
+
 ;; TODO: construction finish detection
 (core/defn make-map-node
   [input-node f]
@@ -401,8 +395,11 @@
             (recur (<!! input) value))))
     (Node. sub-chan id false)))
 
-;; TODO: the trigger node might cause the whole "the first messages a node receive are changed? true" statement totally FALSE!!!!!!
-;; TODO: FIX THIS!!!!
+;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
+;; The reason for this is that if we would not do this, the buffer for the trigger channel would fill up,
+;; until the source node(s) for the input-channel produce a value and the trigger channel would be emptied.
+;; This could lead to situations where a preliminary message with :changed? true is sent out.
+;; The rationale is that a node can only produce a :changed? true value iff all its inputs have been true at least once.
 (core/defn make-throttle-node
   [input-node trigger-node]
   (let [id (new-id!)
