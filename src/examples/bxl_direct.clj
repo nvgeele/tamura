@@ -65,8 +65,8 @@
 (print-signal (t/throttle max-direction 1000))
 ;(print-signal max-direction)
 
-;; TODO: minimise node boilerplate
-;; TODO: buffer
+;; TODO: minimise node boilerplate *
+;; TODO: buffer *
 ;; TODO: leasing
 ;; TODO: filter node
 ;; TODO: betere primitives zodat het duidelijker is wat wat nu juist maakt

@@ -11,7 +11,8 @@
             [tamura.macros :as macros]
             [tamura.values :as v]
             [tamura.funcs :as funcs])
-  (:import [redis.clients.jedis JedisPool]))
+  (:import [redis.clients.jedis JedisPool]
+           [java.util LinkedList]))
 
 (p/import-vars
   [tamura.macros
@@ -128,6 +129,7 @@
 
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
+;; TODO: let coordinator keep list of producers, so we can have something like (coordinator-start) to kick-start errting
 (defrecord Coordinator [in])
 (defrecord Node [sub-chan id source?])
 (defrecord Source [in sub-chan id source?])                 ;; isa Node
@@ -412,6 +414,34 @@
             (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))))
     (Node. sub-chan id false)))
 
+(core/defn make-buffer-node
+  [input-node size]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop sub-chan subscribers)
+    (go-loop [msg (<!! input)
+              previous-set nil
+              buffer-list (LinkedList.)
+              buffer nil]
+      (log/debug (str "buffer-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [new-element (if previous-set
+                            (first (ms/minus (:mset (:value msg)) (:mset previous-set)))
+                            (first (:mset (:value msg))))]
+          (when (= (count buffer-list) size)
+            (.removeLast buffer-list))
+          (.addFirst buffer-list new-element)
+          (let [buffer (make-multiset (:key (:value msg)) (apply ms/multiset buffer-list))]
+            (doseq [sub @subscribers]
+              (>!! sub {:changed? true :value buffer :from id}))
+            (recur (<!! input) (:value msg) buffer-list buffer)))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value buffer :from id}))
+            (recur (<!! input) previous-set buffer-list buffer))))
+    (Node. sub-chan id false)))
+
 (def ^:dynamic *coordinator* (make-coordinator))
 
 ;; TODO: redis sink
@@ -507,6 +537,7 @@
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
 ;; nodes depend on a throttle signal and one or more other signals.
 ;; TODO: something something initialisation?
+;; TODO: what if the input hasn't changed next time we trigger? Do we still propagate a "change"?
 (core/defn throttle
   [signal ms]
   (if (v/signal? signal)
@@ -520,10 +551,13 @@
       (v/make-signal throttle-node))
     (throw (Exception. "first argument of throttle must be signal"))))
 
-;; TODO: buffer
 (core/defn buffer
-  [& args]
-  (throw (Exception. "TODO")))
+  [sig size]
+  (if (v/signal? sig)
+    (let [source-node (v/value sig)
+          node (make-buffer-node source-node size)]
+      (v/make-signal node))
+    (throw (Exception. "first argument to delay should be a signal"))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous
@@ -538,10 +572,8 @@
   [& args]
   (comment (println "") (println "") (println ""))
 
-  (let [r (make-redis "localhost" "testqueue" :key :id)]
-    (print-signal r)
-    (print-signal (delay r))
-    (print-signal (delay (delay r))))
+  (let [r (make-redis "localhost" "testqueue")]
+    (print-signal (buffer r 4)))
 
   #_(let [r (make-redis "localhost" "bxlqueue")
         f (filter even? r)
