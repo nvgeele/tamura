@@ -233,9 +233,7 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
+        input (subscribe-input input-node)]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
@@ -261,10 +259,7 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        inputs (for [node input-nodes]
-                 (let [c (chan)]
-                   (node-subscribe node c)
-                   c))]
+        inputs (subscribe-inputs input-nodes)]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
@@ -288,9 +283,7 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
+        input (subscribe-input input-node)]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
@@ -314,9 +307,7 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
+        input (subscribe-input input-node)]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
@@ -358,10 +349,7 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        inputs (for [node [left-node right-node]]
-                 (let [c (chan)]
-                   (node-subscribe node c)
-                   c))]
+        inputs (subscribe-inputs [left-node right-node])]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
@@ -396,9 +384,7 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
+        input (subscribe-input input-node)]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
@@ -423,9 +409,7 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
+        input (subscribe-input input-node)]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
@@ -450,12 +434,8 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)
-        trigger (let [c (chan)]
-                  (node-subscribe trigger-node c)
-                  c)]
+        input (subscribe-input input-node)
+        trigger (subscribe-input trigger-node)]
     (go-loop [in (<!! sub-chan)]
       (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
       (recur (<!! sub-chan)))
