@@ -131,7 +131,7 @@
 (defrecord Coordinator [in])
 (defrecord Node [sub-chan id source?])
 (defrecord Source [in sub-chan id source?])                 ;; isa Node
-(defrecord Sink [in id source?])                            ;; isa Node
+(defrecord Sink [id source?])                               ;; isa Node
 
 (def buffer-size 32)
 (defmacro chan
@@ -250,25 +250,16 @@
             (recur (<!! input) value))))
     (Node. sub-chan id false)))
 
-;; TODO: remove subscribers, it's a sink
 (core/defn make-do-apply-node
   [input-nodes action]
   (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
         inputs (subscribe-inputs input-nodes)]
-    (subscriber-loop sub-chan subscribers)
-    (go-loop [msgs (map <!! inputs)
-              value nil]
+    (go-loop [msgs (map <!! inputs)]
       (log/debug (str "do-apply-node " id " has received: " (seq msgs)))
-      (let [[changed? v]
-            (if (ormap :changed? msgs)
-              [true (apply action (map :value msgs))]
-              [false value])]
-        (doseq [sub @subscribers]
-          (>!! sub {:changed? changed? :value v :from id}))
-        (recur (map <!! inputs) v)))
-    (Node. sub-chan id false)))
+      (when (ormap :changed? msgs)
+        (apply action (map :value msgs)))
+      (recur (map <!! inputs)))
+    (Sink. id false)))
 
 ;; TODO: more generic approach to node construction
 ;; TODO: filter should *always* propagate a value...
