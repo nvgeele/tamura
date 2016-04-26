@@ -6,7 +6,7 @@
   [host queue id]
   (let [conn (Jedis. host)]
     (t/threadloop []
-      (.lpush conn queue (into-array String [(str {:user-id id :position [(Math/random) (Math/random)]})]))
+      (.rpush conn queue (into-array String [(str {:user-id id :position [(Math/random) (Math/random)]})]))
       (Thread/sleep 1000)
       (recur))))
 
@@ -17,5 +17,5 @@
 
 (defn -main
   [& args]
-  (spawn-threads "localhost" "bxlqueue" 10)
+  (spawn-threads "localhost" "bxlqueue" 25)
   (println "Done!"))

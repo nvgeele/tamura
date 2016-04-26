@@ -313,13 +313,11 @@
         conn (.getResource pool)]
     (>!! (:in *coordinator*) {:new-source (:in node)})
     (thread (loop [set (make-multiset key)]
-              (Thread/sleep 10)
-              (if-let [v (.rpop conn queue)]
-                (let [parsed (edn/read-string v)
-                      new-set (multiset-insert set parsed)]
-                  (>!! (:in *coordinator*) {:destination id :value new-set})
-                  (recur new-set))
-                (recur set))))
+              (let [v (second (.blpop conn 0 (into-array String [queue])))
+                    parsed (edn/read-string v)
+                    new-set (multiset-insert set parsed)]
+                (>!! (:in *coordinator*) {:destination id :value new-set})
+                (recur new-set))))
     (v/make-signal node)))
 
 ;; TODO: maybe rename to redis-input
@@ -581,12 +579,18 @@
   [& args]
   (throw (Exception. "TODO")))
 
+(defmacro print-signal
+  [signal]
+  `(do-apply #(println (str (quote ~signal) ": " %)) ~signal))
+
 (core/defn -main
   [& args]
   (comment (println "") (println "") (println ""))
 
-  #_(let [r (make-redis "localhost" "testqueue")]
-    ((lift println) (delay r)))
+  (let [r (make-redis "localhost" "testqueue" :key :id)]
+    (print-signal r)
+    (print-signal (delay r))
+    (print-signal (delay (delay r))))
 
   #_(let [r (make-redis "localhost" "bxlqueue")
         f (filter even? r)
