@@ -142,6 +142,10 @@
   []
   (swap! counter inc))
 
+(defmacro node-subscribe
+  [source channel]
+  `(>!! (:sub-chan ~source) {:subscribe ~channel}))
+
 ;; TODO: do we still need heights?
 ;; TODO: phase2 of multiclock reactive programming (detect when construction is done) (or cheat and Thread/sleep)
 (core/defn make-coordinator
@@ -198,9 +202,20 @@
              :else (recur (<!! in) subs value)))
     (Source. in in id true)))
 
-(defmacro node-subscribe
-  [source channel]
-  `(>!! (:sub-chan ~source) {:subscribe ~channel}))
+;; TODO: for generic node construction
+(defmacro defnode
+  [bindings & body]
+  `nil)
+
+(core/defn subscribe-input
+  [input]
+  (let [c (chan)]
+    (node-subscribe input c)
+    c))
+
+(core/defn subscribe-inputs
+  [inputs]
+  (map subscribe-input inputs))
 
 ;; input nodes = the actual node records
 ;; inputs = input channels
@@ -294,10 +309,167 @@
             :else (recur (<!! input) pass? value)))
     (Node. sub-chan id false)))
 
-;; TODO: for generic node construction
-(defmacro defnode
-  [bindings & body]
-  `nil)
+(core/defn make-delay-node
+  [input-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              previous-set false
+              delayed-set false]
+      (log/debug (str "delay-node " id " has received: " msg))
+      (let [new-set (:value msg)
+            key (:key new-set)]
+        (cond
+          (and previous-set (:changed? msg))
+          (let [new-element (first (ms/minus (:mset new-set) (:mset previous-set)))
+                delayed-set
+                (if key
+                  (if-let [existing (multiset-get previous-set (get new-element key))]
+                    (multiset-insert delayed-set existing)
+                    delayed-set)
+                  previous-set)]
+            (doseq [sub @subscribers]
+              (>!! sub {:changed? true :value delayed-set :from id}))
+            (recur (<!! input) new-set delayed-set))
+
+          previous-set
+          (do (doseq [sub @subscribers]
+                (>!! sub {:changed? false :value delayed-set :from id}))
+              (recur (<!! input) new-set delayed-set))
+
+          :else
+          (let [delayed-set (make-multiset key)]
+            (doseq [sub @subscribers]
+              (>!! sub {:changed? (:changed? msg)       ;; should always be true
+                        :value delayed-set
+                        :from id}))
+            (recur (<!! input) new-set delayed-set)))))
+    (Node. sub-chan id false)))
+
+(core/defn make-zip-node
+  [left-node right-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        inputs (for [node [left-node right-node]]
+                 (let [c (chan)]
+                   (node-subscribe node c)
+                   c))]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msgs (map <!! inputs)
+              zipped false]
+      (log/debug (str "zip-node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [lset (:value (first msgs))
+              rset (:value (second msgs))
+              key (:key lset)
+              lkvals (map #(get % key) (:mset lset))
+              rkvals (map #(get % key) (:mset rset))
+              in-both (cs/union (set lkvals) (set rkvals))
+              pairs (for [kv in-both
+                          :let [lv (multiset-get lset kv)
+                                rv (multiset-get rset kv)]
+                          :when (and rv lv)]
+                      [lv rv])
+              zipped (make-multiset false (apply ms/multiset pairs))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value zipped :from id}))
+          (recur (map <!! inputs) zipped))
+        ;; If nothing is changed, zipped should be initialised
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value zipped :from id}))
+            (recur (map <!! inputs) zipped))))
+    (Node. sub-chan id false)))
+
+;; TODO: throw error when input set is keyed?
+(core/defn make-multiplicities-node
+  [input-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              value nil]
+      (log/debug (str "multiplicities-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (:mset (:value msg))
+              multiplicities (ms/multiplicities values)
+              new-set (make-multiset false (apply ms/multiset (seq multiplicities)))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-set :from id}))
+          (recur (<!! input) new-set))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
+
+;; TODO: reduce with initial value
+(core/defn make-reduce-node
+  [input-node f]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              value nil]
+      (log/debug (str "reduce-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (:mset (:value msg))
+              reduced (if (>= (count values) 2) (reduce f values) nil)
+              new-set (make-multiset false (ms/multiset reduced))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-set :from id}))
+          (recur (<!! input) new-set))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
+
+;; TODO: the trigger node might cause the whole "the first messages a node receive are changed? true" statement totally FALSE!!!!!!
+(core/defn make-throttle-node
+  [input-node trigger-node]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (let [c (chan)]
+                (node-subscribe input-node c)
+                c)
+        trigger (let [c (chan)]
+                  (node-subscribe trigger-node c)
+                  c)]
+    (go-loop [in (<!! sub-chan)]
+      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
+      (recur (<!! sub-chan)))
+    (go-loop [msg (<!! input)
+              trig (<!! trigger)]
+      (log/debug (str "throttle-node " id " has received: " msg))
+      (if (:changed? trig)
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? true :value (:value msg) :from id}))
+            (recur (<!! input) (<!! trigger)))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value (:value msg) :from id}))
+            (recur (<!! input) (<!! trigger)))))
+    (Node. sub-chan id false)))
 
 (def ^:dynamic *coordinator* (make-coordinator))
 
@@ -362,50 +534,6 @@
 ;; TODO: sample
 ;; TODO: foldp
 
-(core/defn make-delay-node
-  [input-node]
-  (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
-    (go-loop [msg (<!! input)
-              previous-set false
-              delayed-set false]
-      (log/debug (str "delay-node " id " has received: " msg))
-      (let [new-set (:value msg)
-            key (:key new-set)]
-        (cond
-          (and previous-set (:changed? msg))
-          (let [new-element (first (ms/minus (:mset new-set) (:mset previous-set)))
-                delayed-set
-                (if key
-                  (if-let [existing (multiset-get previous-set (get new-element key))]
-                    (multiset-insert delayed-set existing)
-                    delayed-set)
-                  previous-set)]
-            (doseq [sub @subscribers]
-              (>!! sub {:changed? true :value delayed-set :from id}))
-            (recur (<!! input) new-set delayed-set))
-
-          previous-set
-          (do (doseq [sub @subscribers]
-                (>!! sub {:changed? false :value delayed-set :from id}))
-              (recur (<!! input) new-set delayed-set))
-
-          :else
-          (let [delayed-set (make-multiset key)]
-            (doseq [sub @subscribers]
-              (>!! sub {:changed? (:changed? msg)       ;; should always be true
-                        :value delayed-set
-                        :from id}))
-            (recur (<!! input) new-set delayed-set)))))
-    (Node. sub-chan id false)))
-
 (core/defn delay
   [arg]
   (if (v/signal? arg)
@@ -414,108 +542,17 @@
       (v/make-signal node))
     (throw (Exception. "argument to delay should be a signal"))))
 
-(core/defn make-zip-node
-  [left-node right-node]
-  (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
-        inputs (for [node [left-node right-node]]
-                 (let [c (chan)]
-                   (node-subscribe node c)
-                   c))]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
-    (go-loop [msgs (map <!! inputs)
-              zipped false]
-      (log/debug (str "zip-node " id " has received: " msgs))
-      (if (ormap :changed? msgs)
-        (let [lset (:value (first msgs))
-              rset (:value (second msgs))
-              key (:key lset)
-              lkvals (map #(get % key) (:mset lset))
-              rkvals (map #(get % key) (:mset rset))
-              in-both (cs/union (set lkvals) (set rkvals))
-              pairs (for [kv in-both
-                          :let [lv (multiset-get lset kv)
-                                rv (multiset-get rset kv)]
-                          :when (and rv lv)]
-                      [lv rv])
-              zipped (make-multiset false (apply ms/multiset pairs))]
-          (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value zipped :from id}))
-          (recur (map <!! inputs) zipped))
-        ;; If nothing is changed, zipped should be initialised
-        (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value zipped :from id}))
-            (recur (map <!! inputs) zipped))))
-    (Node. sub-chan id false)))
-
 (core/defn zip
   [left right]
   (if (and (v/signal? left) (v/signal? right))
     (v/make-signal (make-zip-node (v/value left) (v/value right)))
     (throw (Exception. "arguments to zip should be signals"))))
 
-;; TODO: throw error when input set is keyed?
-(core/defn make-multiplicities-node
-  [input-node]
-  (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
-    (go-loop [msg (<!! input)
-              value nil]
-      (log/debug (str "multiplicities-node " id " has received: " msg))
-      (if (:changed? msg)
-        (let [values (:mset (:value msg))
-              multiplicities (ms/multiplicities values)
-              new-set (make-multiset false (apply ms/multiset (seq multiplicities)))]
-          (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-set :from id}))
-          (recur (<!! input) new-set))
-        (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
-    (Node. sub-chan id false)))
-
 (core/defn multiplicities
   [arg]
   (if (v/signal? arg)
     (v/make-signal (make-multiplicities-node (v/value arg)))
     (throw (Exception. "argument to delay should be a signal"))))
-
-;; TODO: reduce with initial value
-(core/defn make-reduce-node
-  [input-node f]
-  (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
-    (go-loop [msg (<!! input)
-              value nil]
-      (log/debug (str "reduce-node " id " has received: " msg))
-      (if (:changed? msg)
-        (let [values (:mset (:value msg))
-              reduced (if (>= (count values) 2) (reduce f values) nil)
-              new-set (make-multiset false (ms/multiset reduced))]
-          (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-set :from id}))
-          (recur (<!! input) new-set))
-        (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
-    (Node. sub-chan id false)))
 
 (core/defn reduce
   ([f arg]
@@ -525,33 +562,6 @@
          (v/make-signal))
      (core/reduce f arg)))
   ([f val coll] (core/reduce f val coll)))
-
-;; TODO: the trigger node might cause the whole "the first messages a node receive are changed? true" statement totally FALSE!!!!!!
-(core/defn make-throttle-node
-  [input-node trigger-node]
-  (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
-        input (let [c (chan)]
-                (node-subscribe input-node c)
-                c)
-        trigger (let [c (chan)]
-                  (node-subscribe trigger-node c)
-                  c)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
-    (go-loop [msg (<!! input)
-              trig (<!! trigger)]
-      (log/debug (str "throttle-node " id " has received: " msg))
-      (if (:changed? trig)
-        (do (doseq [sub @subscribers]
-              (>!! sub {:changed? true :value (:value msg) :from id}))
-            (recur (<!! input) (<!! trigger)))
-        (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value (:value msg) :from id}))
-            (recur (<!! input) (<!! trigger)))))
-    (Node. sub-chan id false)))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
 ;; nodes depend on a throttle signal and one or more other signals.
