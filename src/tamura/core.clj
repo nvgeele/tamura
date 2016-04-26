@@ -202,11 +202,6 @@
              :else (recur (<!! in) subs value)))
     (Source. in in id true)))
 
-;; TODO: for generic node construction
-(defmacro defnode
-  [bindings & body]
-  `nil)
-
 (core/defn subscribe-input
   [input]
   (let [c (chan)]
@@ -216,6 +211,17 @@
 (core/defn subscribe-inputs
   [inputs]
   (map subscribe-input inputs))
+
+;; TODO: for generic node construction
+(defmacro defnode
+  [name inputs bindings & body]
+  `(throw (Exception. "TODO")))
+
+(defmacro subscriber-loop
+  [channel subscribers]
+  `(go-loop [in# (<!! ~channel)]
+     (match in# {:subscribe c#} (swap! ~subscribers #(cons c# %)) :else nil)
+     (recur (<!! ~channel))))
 
 ;; input nodes = the actual node records
 ;; inputs = input channels
@@ -234,9 +240,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
               value nil]
       (log/debug (str "map-node " id " has received: " msg))
@@ -260,9 +264,7 @@
         sub-chan (chan)
         subscribers (atom [])
         inputs (subscribe-inputs input-nodes)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msgs (map <!! inputs)
               value nil]
       (log/debug (str "do-apply-node " id " has received: " (seq msgs)))
@@ -284,9 +286,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
               pass? false
               value nil]
@@ -308,9 +308,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
               previous-set false
               delayed-set false]
@@ -350,9 +348,7 @@
         sub-chan (chan)
         subscribers (atom [])
         inputs (subscribe-inputs [left-node right-node])]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msgs (map <!! inputs)
               zipped false]
       (log/debug (str "zip-node " id " has received: " msgs))
@@ -385,9 +381,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
               value nil]
       (log/debug (str "multiplicities-node " id " has received: " msg))
@@ -410,9 +404,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
               value nil]
       (log/debug (str "reduce-node " id " has received: " msg))
@@ -436,9 +428,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)
         trigger (subscribe-input trigger-node)]
-    (go-loop [in (<!! sub-chan)]
-      (match in {:subscribe c} (swap! subscribers #(cons c %)) :else nil)
-      (recur (<!! sub-chan)))
+    (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
               trig (<!! trigger)]
       (log/debug (str "throttle-node " id " has received: " msg))
