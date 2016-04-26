@@ -177,7 +177,7 @@
         id (new-id!)]
     (go-loop [msg (<!! in)
               subs []
-              value false]
+              value nil]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
              {:subscribe subscriber}
@@ -191,11 +191,10 @@
                  (recur (<!! in) subs {:v new-value}))
 
              {:destination _}
-             (do (when value
-                   (doseq [sub subs]
-                     (>!! sub {:changed? false
-                               :value (:v value)
-                               :origin id})))
+             (do (doseq [sub subs]
+                   (>!! sub {:changed? false
+                             :value value
+                             :origin id}))
                  (recur (<!! in) subs value))
 
              ;; TODO: error?
@@ -282,25 +281,7 @@
 ;; TODO: think about intialisation
 (core/defn make-filter-node
   [input-node predicate]
-  (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
-    (go-loop [msg (<!! input)
-              pass? false
-              value nil]
-      (log/debug (str "filter-node " id " has received: " msg))
-      (cond (:changed? msg) (let [pass? (predicate (:value msg))]
-                              (when pass?
-                                (doseq [sub @subscribers]
-                                  (>!! sub {:changed? true :value (:value msg) :from id})))
-                              (recur (<!! input) pass? value))
-            pass? (do (doseq [sub @subscribers]
-                        (>!! sub {:changed? false :value value :from id}))
-                      (recur (<!! input) pass? value))
-            :else (recur (<!! input) pass? value)))
-    (Node. sub-chan id false)))
+  (throw (Exception. "TODO")))
 
 (core/defn make-delay-node
   [input-node]
@@ -336,7 +317,7 @@
           :else
           (let [delayed-set (make-multiset key)]
             (doseq [sub @subscribers]
-              (>!! sub {:changed? (:changed? msg)       ;; should always be true
+              (>!! sub {:changed? (:changed? msg)
                         :value delayed-set
                         :from id}))
             (recur (<!! input) new-set delayed-set)))))
@@ -350,7 +331,7 @@
         inputs (subscribe-inputs [left-node right-node])]
     (subscriber-loop sub-chan subscribers)
     (go-loop [msgs (map <!! inputs)
-              zipped false]
+              zipped nil]
       (log/debug (str "zip-node " id " has received: " msgs))
       (if (ormap :changed? msgs)
         (let [lset (:value (first msgs))
@@ -421,6 +402,7 @@
     (Node. sub-chan id false)))
 
 ;; TODO: the trigger node might cause the whole "the first messages a node receive are changed? true" statement totally FALSE!!!!!!
+;; TODO: FIX THIS!!!!
 (core/defn make-throttle-node
   [input-node trigger-node]
   (let [id (new-id!)
@@ -430,15 +412,16 @@
         trigger (subscribe-input trigger-node)]
     (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
-              trig (<!! trigger)]
+              trig (<!! trigger)
+              seen-value false]
       (log/debug (str "throttle-node " id " has received: " msg))
       (if (:changed? trig)
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? true :value (:value msg) :from id}))
-            (recur (<!! input) (<!! trigger)))
+              (>!! sub {:changed? (or seen-value (:changed? msg)) :value (:value msg) :from id}))
+            (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))
         (do (doseq [sub @subscribers]
               (>!! sub {:changed? false :value (:value msg) :from id}))
-            (recur (<!! input) (<!! trigger)))))
+            (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))))
     (Node. sub-chan id false)))
 
 (def ^:dynamic *coordinator* (make-coordinator))
@@ -543,8 +526,8 @@
           throttle-node (make-throttle-node (v/value signal) source-node)]
       (>!! (:in *coordinator*) {:new-source (:in source-node)})
       (threadloop []
-        (>!! (:in *coordinator*) {:destination (:id source-node) :value true})
         (Thread/sleep ms)
+        (>!! (:in *coordinator*) {:destination (:id source-node) :value true})
         (recur))
       (v/make-signal throttle-node))
     (throw (Exception. "first argument of throttle must be signal"))))
