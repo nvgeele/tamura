@@ -263,6 +263,7 @@
       (recur (map <!! inputs)))
     (Sink. id false)))
 
+;; TODO: say false when no new element is added to the filtered set?
 (core/defn make-filter-node
   [input-node predicate]
   (let [id (new-id!)
@@ -448,11 +449,15 @@
                             (first (:mset (:value msg))))]
           (when (= (count buffer-list) size)
             (.removeLast buffer-list))
-          (.addFirst buffer-list new-element)
-          (let [buffer (make-multiset (:key (:value msg)) (apply ms/multiset buffer-list))]
-            (doseq [sub @subscribers]
-              (>!! sub {:changed? true :value buffer :from id}))
-            (recur (<!! input) (:value msg) buffer-list buffer)))
+          (if new-element
+            (do (.addFirst buffer-list new-element)
+                (let [buffer (make-multiset (:key (:value msg)) (apply ms/multiset buffer-list))]
+                  (doseq [sub @subscribers]
+                    (>!! sub {:changed? true :value buffer :from id}))
+                  (recur (<!! input) (:value msg) buffer-list buffer)))
+            (do (doseq [sub @subscribers]
+                  (>!! sub {:changed? true :value buffer :from id}))
+                (recur (<!! input) (:value msg) buffer-list buffer))))
         (do (doseq [sub @subscribers]
               (>!! sub {:changed? false :value buffer :from id}))
             (recur (<!! input) previous-set buffer-list buffer))))
