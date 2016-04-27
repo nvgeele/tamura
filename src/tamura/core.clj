@@ -278,8 +278,6 @@
               filtered (filter predicate values)
               new-set (make-multiset (:key (:value msg))
                                      (apply ms/multiset filtered))]
-          (println filtered)
-          (println new-set)
           (doseq [sub @subscribers]
             (>!! sub {:changed? true :value new-set :from id}))
           (recur (<!! input) new-set))
