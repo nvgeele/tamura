@@ -263,12 +263,30 @@
       (recur (map <!! inputs)))
     (Sink. id false)))
 
-;; TODO: more generic approach to node construction
-;; TODO: filter should *always* propagate a value...
-;; TODO: think about intialisation
 (core/defn make-filter-node
   [input-node predicate]
-  (throw (Exception. "TODO")))
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop sub-chan subscribers)
+    (go-loop [msg (<!! input)
+              value nil]
+      (log/debug (str "filter-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (:mset (:value msg))
+              filtered (filter predicate values)
+              new-set (make-multiset (:key (:value msg))
+                                     (apply ms/multiset filtered))]
+          (println filtered)
+          (println new-set)
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-set :from id}))
+          (recur (<!! input) new-set))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
 
 (core/defn make-delay-node
   [input-node]
@@ -573,7 +591,7 @@
   (comment (println "") (println "") (println ""))
 
   (let [r (make-redis "localhost" "testqueue")]
-    (print-signal (buffer r 4)))
+    (print-signal (buffer (filter even? r) 4)))
 
   #_(let [r (make-redis "localhost" "bxlqueue")
         f (filter even? r)
