@@ -277,6 +277,56 @@
             (recur (<!! input) value))))
     (Node. sub-chan id false)))
 
+(core/defn make-map-hash-node
+  [input-node f]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop sub-chan subscribers)
+    (go-loop [msg (<!! input)
+              value (make-hash)]
+      (log/debug (str "map-to-hash-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (if (hash? (:value msg))
+                       (:hash (:value msg))
+                       (:multiset (:value msg)))
+              new-hash (make-hash (reduce (fn [h v]
+                                            (let [[k v] (f v)]
+                                              (assoc h k v)))
+                                          {}
+                                          hash))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-hash :from id}))
+          (recur (<!! input) new-hash))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
+
+(core/defn make-map-multiset-node
+  [input-node f]
+  (let [id (new-id!)
+        sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop sub-chan subscribers)
+    (go-loop [msg (<!! input)
+              value (make-multiset)]
+      (log/debug (str "map-to-multiset-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [values (if (hash? (:value msg))
+                       (:hash (:value msg))
+                       (:multiset (:value msg)))
+              new-set (make-multiset (apply ms/multiset (map f values)))]
+          (doseq [sub @subscribers]
+            (>!! sub {:changed? true :value new-set :from id}))
+          (recur (<!! input) new-set))
+        (do (doseq [sub @subscribers]
+              (>!! sub {:changed? false :value value :from id}))
+            (recur (<!! input) value))))
+    (Node. sub-chan id false)))
+
 (core/defn make-do-apply-node
   [input-nodes action]
   (let [id (new-id!)
@@ -284,7 +334,9 @@
     (go-loop [msgs (map <!! inputs)]
       (log/debug (str "do-apply-node " id " has received: " (seq msgs)))
       (when (ormap :changed? msgs)
-        (apply action (map :value msgs)))
+        (let [values (map :value msgs)
+              colls (map #(if (hash? %) (:hash %) (:multiset %)) values)]
+          (apply action colls)))
       (recur (map <!! inputs)))
     (Sink. id false)))
 
@@ -519,6 +571,24 @@
           node (make-map-node source-node f)]
       (v/make-signal node))
     (core/map f arg)))
+
+;; TODO: test
+(core/defn map-to-hash
+  [f arg]
+  (if (v/signal? arg)
+    (let [source-node (v/value arg)
+          node (make-map-hash-node source-node f)]
+      (v/make-signal node))
+    (throw (Exception. "map-to-hash requires a signal as second argument"))))
+
+;; TODO: test
+(core/defn map-to-multiset
+  [f arg]
+  (if (v/signal? arg)
+    (let [source-node (v/value arg)
+          node (make-map-multiset-node source-node f)]
+      (v/make-signal node))
+    (throw (Exception. "map-to-multiset requires a signal as second argument"))))
 
 (core/defn lift
   [f]

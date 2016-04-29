@@ -39,7 +39,7 @@
 
 (defmacro print-signal
   [signal]
-  `(t/do-apply #(println (str (quote ~signal) ": " %)) ~signal))
+  `(t/do-apply #(println (quote ~signal) ": " %) ~signal))
 
 (t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id))
 ;(print-signal positions)
@@ -50,29 +50,56 @@
 (t/defsig updates (t/zip positions old-positions))
 ;(print-signal updates)
 
-(t/defsig directions (t/map (fn [[new old]]
-                              (calculate-direction (:position new) (:position old)))
-                            updates))
+(t/defsig directions (t/map-to-multiset (fn [[user-id [new old]]]
+                                          (calculate-direction (:position new) (:position old)))
+                                        updates))
 ;(print-signal directions)
 
 (t/defsig direction-count (t/multiplicities directions))
 ;(t/defsig direction-count (t/multiplicities (t/throttle directions 1000)))
-;(print-signal direction-count)
+(print-signal direction-count)
 
-(t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
+;(t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
 ;(print-signal max-direction)
 
-(print-signal (t/throttle max-direction 1000))
+;(print-signal (t/throttle max-direction 1000))
 ;(print-signal max-direction)
 
 ;; TODO: minimise node boilerplate *
 ;; TODO: buffer *
+;; TODO: test een delay na een buffer...
+;; TODO: fix the whole doseq recur stuff, too verbose, too much duplication
 ;; TODO: leasing
 ;; TODO: filter node
 ;; TODO: betere primitives zodat het duidelijker is wat wat nu juist maakt
 ;; TODO: meer examples
 ;; TODO: waarom sets juist?
 ;; TODO: static architecture
+;; TODO: make nodes testable
+
+(comment (map-multiset (fn [key value]
+                         (return new-value-for-key))
+                       keyed-signal)
+
+         (map (fn [value]
+                (return new-value))
+              non-keyed-signal)
+
+         (filter (fn [key value]
+                   true)
+                 keyed-signal)
+
+         (filter (fn [value]
+                   true)
+                 non-keyed-signal)
+
+         (transform (fn [value]
+                      [key value])
+                    non-keyed-signal)
+
+         (transform (fn [key value]
+                      value)
+                    keyed-signal))
 
 ;;;;;;;;;;;;;;;
 
