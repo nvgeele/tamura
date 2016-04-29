@@ -254,29 +254,6 @@
 ;; Possible solution: an inputs-seen flag of some sorts?
 
 ;; TODO: construction finish detection
-(core/defn make-map-node
-  [input-node f]
-  (let [id (new-id!)
-        sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
-    (go-loop [msg (<!! input)
-              value nil]
-      (log/debug (str "map-node " id " has received: " msg))
-      (if (:changed? msg)
-        (let [values (:mset (:value msg))
-              mapped (map f values)
-              new-set (make-multiset (:key (:value msg))
-                                     (apply ms/multiset mapped))]
-          (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-set :from id}))
-          (recur (<!! input) new-set))
-        (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
-    (Node. sub-chan id false)))
-
 (core/defn make-map-hash-node
   [input-node f]
   (let [id (new-id!)
@@ -564,14 +541,6 @@
 ;; For incremental etc: keep dict of input => output for elements
 ;; TODO: what if function changes key?
 ;; Possible solution: prevent by comparing in and output, and make keychanges possible by special map function
-(core/defn map
-  [f arg]
-  (if (v/signal? arg)
-    (let [source-node (v/value arg)
-          node (make-map-node source-node f)]
-      (v/make-signal node))
-    (core/map f arg)))
-
 ;; TODO: test
 (core/defn map-to-hash
   [f arg]
