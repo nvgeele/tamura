@@ -407,7 +407,7 @@
             (recur (map <!! inputs) zipped))))
     (Node. sub-chan id false)))
 
-;; TODO: throw error when input set is keyed?
+;; TODO: assert input is a multiset
 (core/defn make-multiplicities-node
   [input-node]
   (let [id (new-id!)
@@ -419,9 +419,8 @@
               value nil]
       (log/debug (str "multiplicities-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (:mset (:value msg))
-              multiplicities (ms/multiplicities values)
-              new-set (make-multiset false (apply ms/multiset (seq multiplicities)))]
+        (let [multiplicities (multiset-multiplicities (:value msg))
+              new-set (make-multiset (apply ms/multiset (seq multiplicities)))]
           (doseq [sub @subscribers]
             (>!! sub {:changed? true :value new-set :from id}))
           (recur (<!! input) new-set))
