@@ -1,6 +1,8 @@
 (ns tamura.values
   (:require [clojure.string :as str]))
 
+;; TODO: type of data produced in signal stuffs
+
 (defprotocol TaggedValue
   (tag [this])
   (value [this]))

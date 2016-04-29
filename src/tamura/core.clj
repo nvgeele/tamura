@@ -110,6 +110,11 @@
   (let [hash (:hash hash)]
     (get hash key)))
 
+(core/defn hash-keys
+  [hash]
+  (let [hash (:hash hash)]
+    (keys hash)))
+
 (core/defn hash-insert
   [hash key val]
   (make-hash (assoc (:hash hash) key val)))
@@ -342,6 +347,7 @@
                 (recur (<!! input) previous delayed))))
     (Node. sub-chan id false)))
 
+;; TODO: assert l and r are hashes
 (core/defn make-zip-node
   [left-node right-node]
   (let [id (new-id!)
@@ -349,26 +355,24 @@
         subscribers (atom [])
         inputs (subscribe-inputs [left-node right-node])]
     (subscriber-loop sub-chan subscribers)
-    (go-loop [msgs (map <!! inputs)
-              zipped nil]
-      (log/debug (str "zip-node " id " has received: " msgs))
-      (if (ormap :changed? msgs)
-        (let [lset (:value (first msgs))
-              rset (:value (second msgs))
-              key (:key lset)
-              lkvals (map #(get % key) (:mset lset))
-              rkvals (map #(get % key) (:mset rset))
-              in-both (cs/union (set lkvals) (set rkvals))
-              pairs (for [kv in-both
-                          :let [lv (multiset-get lset kv)
-                                rv (multiset-get rset kv)]
-                          :when (and rv lv)]
-                      [lv rv])
-              zipped (make-multiset false (apply ms/multiset pairs))]
+    (go-loop [[l r] (map <!! inputs)
+              zipped (make-multiset)]
+      (log/debug (str "zip-node " id " has received: " [l r]))
+      (if (or (:changed? l) (:changed? r))
+        (let [lh (:value l)
+              rh (:value r)
+              lkeys (set (hash-keys lh))
+              rkeys (set (hash-keys rh))
+              in-both (cs/intersection lkeys rkeys)
+              hash (reduce (fn [h key]
+                             (assoc h
+                               key [(hash-get lh key) (hash-get rh key)]))
+                           {}
+                           in-both)
+              zipped (make-hash hash)]
           (doseq [sub @subscribers]
             (>!! sub {:changed? true :value zipped :from id}))
           (recur (map <!! inputs) zipped))
-        ;; If nothing is changed, zipped should be initialised
         (do (doseq [sub @subscribers]
               (>!! sub {:changed? false :value zipped :from id}))
             (recur (map <!! inputs) zipped))))
@@ -609,14 +613,12 @@
 
 (core/defn -main
   [& args]
-  (comment (println "") (println "") (println ""))
-
   (let [rh (make-redis "localhost" "tqh" :key :id)
-        delayed (delay rh)]
-    #_(print-signal (buffer (filter even? r) 4))
-    (print-signal rh)
-    (print-signal delayed)
-    ;;(print-signal (delay (buffer r 4)))
+        delayed (delay rh)
+        zipped (zip rh delayed)]
+    ;(print-signal rh)
+    ;(print-signal delayed)
+    (print-signal zipped)
     )
 
   (let [rms (make-redis "localhost" "tqms")
@@ -624,16 +626,4 @@
     (print-signal rms)
     (print-signal delayed))
 
-  (println "Ready")
-
-  #_(let [r (make-redis "localhost" "bxlqueue")
-        f (filter even? r)
-        m1 (map inc f)
-        m2 (map2 + f m1)]
-    ((lift println) m2))
-
-  #_(let [r1 (make-redis "localhost" "lq")
-        r2 (make-redis "localhost" "rq")]
-    ((lift println) (map2 + r1 r2)))
-
-  #_(println "Done"))
+  (println "Ready"))
