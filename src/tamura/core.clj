@@ -159,6 +159,10 @@
   ([hash key-val val]
    (make-hash (:key hash) (assoc (:hash hash) key-val (dissoc val (:key hash))))))
 
+(core/defn hash->set
+  [hash]
+  (set (:hash hash)))
+
 (core/defn make-multiset
   ([]
    (make-multiset (ms/multiset)))
@@ -348,6 +352,7 @@
             (recur (<!! input) value))))
     (Node. sub-chan id false)))
 
+;; TODO: put in docstring that it emits empty hash or set
 (core/defn make-delay-node
   [input-node]
   (let [id (new-id!)
@@ -356,36 +361,29 @@
         input (subscribe-input input-node)]
     (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
-              previous-set false
-              delayed-set false]
+              previous (set nil)
+              delayed nil]
       (log/debug (str "delay-node " id " has received: " msg))
-      (let [new-set (:value msg)
-            key (:key new-set)]
-        (cond
-          (and previous-set (:changed? msg))
-          (let [new-element (first (ms/minus (:mset new-set) (:mset previous-set)))
-                delayed-set
-                (if key
-                  (if-let [existing (multiset-get previous-set (get new-element key))]
-                    (multiset-insert delayed-set existing)
-                    delayed-set)
-                  previous-set)]
-            (doseq [sub @subscribers]
-              (>!! sub {:changed? true :value delayed-set :from id}))
-            (recur (<!! input) new-set delayed-set))
+      (cond (and (:changed? msg) (multiset? (:value msg)))
+            (let [delayed (or delayed (make-multiset))]
+              (doseq [sub @subscribers]
+                (>!! sub {:changed? true :value delayed :from id}))
+              (recur (<!! input) nil (:value msg)))
 
-          previous-set
-          (do (doseq [sub @subscribers]
-                (>!! sub {:changed? false :value delayed-set :from id}))
-              (recur (<!! input) new-set delayed-set))
+            (:changed? msg)
+            (let [new-set (hash->set (:value msg))
+                  previous-set (hash->set previous)
+                  new-element (first (cs/difference new-set previous-set))
+                  delayed (if-let [existing (hash-get previous (first new-element))]
+                            (hash-insert delayed (first new-element) existing)
+                            (or delayed (make-hash (hash-key (:value msg)))))]
+              (println delayed)
+              (recur (<!! input) (:value msg) delayed))
 
-          :else
-          (let [delayed-set (make-multiset key)]
-            (doseq [sub @subscribers]
-              (>!! sub {:changed? (:changed? msg)
-                        :value delayed-set
-                        :from id}))
-            (recur (<!! input) new-set delayed-set)))))
+            :else
+            (do (doseq [sub @subscribers]
+                  (>!! sub {:changed? false :value delayed :from id}))
+                (recur (<!! input) previous delayed))))
     (Node. sub-chan id false)))
 
 (core/defn make-zip-node
@@ -657,12 +655,12 @@
 
   (let [rh (make-redis "localhost" "tqh" :key :id)]
     #_(print-signal (buffer (filter even? r) 4))
-    (print-signal rh)
+    (print-signal (delay rh))
     ;;(print-signal (delay (buffer r 4)))
     )
 
   (let [rms (make-redis "localhost" "tqms")]
-    (print-signal rms))
+    (print-signal (delay rms)))
 
   (println "Ready")
 
