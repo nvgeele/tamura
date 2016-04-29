@@ -129,8 +129,10 @@
       (make-multiset false (conj (:mset set) value)))))
 
 (core/defn make-hash
-  [key]
-  {:type ::hash :key key :hash {}})
+  ([key]
+   (make-hash key {}))
+  ([key hash]
+   {:type ::hash :key key :hash hash}))
 
 (core/defn hash?
   [x]
@@ -151,8 +153,11 @@
     (get hash key-val)))
 
 (core/defn hash-insert
-  [hash key-val val]
-  (assoc (:hash hash) key-val (dissoc val (:key hash))))
+  ([hash val]
+   (let [key (:key hash)]
+     (make-hash key (assoc (:hash hash) (get val key) (dissoc val key)))))
+  ([hash key-val val]
+   (make-hash (:key hash) (assoc (:hash hash) key-val (dissoc val (:key hash))))))
 
 (core/defn make-multiset
   ([]
@@ -177,6 +182,9 @@
   (-> (:multiset ms)
       (conj val)
       (make-multiset)))
+
+;; TODO: remove these one done
+(core/defn multiset-get [set val] (throw (Exception. "I'm not supposed to be used")))
 
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
@@ -530,12 +538,12 @@
         pool (JedisPool. host)
         conn (.getResource pool)]
     (>!! (:in *coordinator*) {:new-source (:in node)})
-    (thread (loop [set (make-multiset key)]
-              (let [v (second (.blpop conn 0 (into-array String [queue])))
-                    parsed (edn/read-string v)
-                    new-set (multiset-insert set parsed)]
-                (>!! (:in *coordinator*) {:destination id :value new-set})
-                (recur new-set))))
+    (threadloop [values (if key (make-hash key) (make-multiset))]
+      (let [v (second (.blpop conn 0 (into-array String [queue])))
+            parsed (edn/read-string v)
+            values ((if key hash-insert multiset-insert) values parsed)]
+        (>!! (:in *coordinator*) {:destination id :value values})
+        (recur values)))
     (v/make-signal node)))
 
 ;; TODO: maybe rename to redis-input
@@ -647,12 +655,16 @@
   [& args]
   (comment (println "") (println "") (println ""))
 
-  (let [r (make-redis "localhost" "testqueue" :key :id)]
+  (let [rh (make-redis "localhost" "tqh" :key :id)]
     #_(print-signal (buffer (filter even? r) 4))
-    (print-signal (buffer r 3))
+    (print-signal rh)
     ;;(print-signal (delay (buffer r 4)))
-
     )
+
+  (let [rms (make-redis "localhost" "tqms")]
+    (print-signal rms))
+
+  (println "Ready")
 
   #_(let [r (make-redis "localhost" "bxlqueue")
         f (filter even? r)
