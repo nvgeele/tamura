@@ -318,6 +318,7 @@
     (Sink. id false)))
 
 ;; TODO: say false when no new element is added to the filtered set?
+;; TODO: re-test
 (core/defn make-filter-node
   [input-node predicate]
   (let [id (new-id!)
@@ -329,13 +330,16 @@
               value nil]
       (log/debug (str "filter-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (:mset (:value msg))
+        (let [values (if (hash? (:value msg))
+                       (:hash (:value msg))
+                       (:multiset (:value msg)))
               filtered (filter predicate values)
-              new-set (make-multiset (:key (:value msg))
-                                     (apply ms/multiset filtered))]
+              new (if (hash? (:value msg))
+                    (make-hash (into {} filtered))
+                    (make-multiset (apply ms/multiset filtered)))]
           (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-set :from id}))
-          (recur (<!! input) new-set))
+            (>!! sub {:changed? true :value new :from id}))
+          (recur (<!! input) new))
         (do (doseq [sub @subscribers]
               (>!! sub {:changed? false :value value :from id}))
             (recur (<!! input) value))))
@@ -458,6 +462,7 @@
 ;; until the source node(s) for the input-channel produce a value and the trigger channel would be emptied.
 ;; This could lead to situations where a preliminary message with :changed? true is sent out.
 ;; The rationale is that a node can only produce a :changed? true value iff all its inputs have been true at least once.
+;; TODO: make throttle that propages true on every tick AND one that only propagates true if something has changed since
 (core/defn make-throttle-node
   [input-node trigger-node]
   (let [id (new-id!)
