@@ -37,33 +37,29 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
-(defmacro print-signal
-  [signal]
-  `(t/do-apply #(println (quote ~signal) ": " %) ~signal))
-
 (t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id))
-;(print-signal positions)
+;(t/print-signal positions)
 
 (t/defsig old-positions (t/delay positions))
-;(print-signal old-positions)
+;(t/print-signal old-positions)
 
 (t/defsig updates (t/zip positions old-positions))
-;(print-signal updates)
+;(t/print-signal updates)
 
 (t/defsig directions (t/map-to-multiset (fn [[user-id [new old]]]
                                           (calculate-direction (:position new) (:position old)))
                                         updates))
-;(print-signal directions)
+;(t/print-signal directions)
 
 (t/defsig direction-count (t/multiplicities directions))
 ;(t/defsig direction-count (t/multiplicities (t/throttle directions 1000)))
-(print-signal direction-count)
+;(t/print-signal direction-count)
 
-;(t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
-;(print-signal max-direction)
+(t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
+(t/print-signal max-direction)
 
-;(print-signal (t/throttle max-direction 1000))
-;(print-signal max-direction)
+;(t/print-signal (t/throttle max-direction 1000))
+;(t/print-signal max-direction)
 
 ;; TODO: minimise node boilerplate *
 ;; TODO: buffer *

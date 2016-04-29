@@ -647,7 +647,7 @@
 
 (defmacro print-signal
   [signal]
-  `(do-apply #(println (str (quote ~signal) ": " %)) ~signal))
+  `(do-apply #(println (quote ~signal) ": " %) ~signal))
 
 (core/defn -main
   [& args]
