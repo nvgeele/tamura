@@ -429,21 +429,22 @@
             (recur (<!! input) value))))
     (Node. sub-chan id false)))
 
-;; TODO: reduce with initial value
 (core/defn make-reduce-node
-  [input-node f]
+  [input-node f & initial]
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
-              value nil]
+              value (make-multiset)]
       (log/debug (str "reduce-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (:mset (:value msg))
-              reduced (if (>= (count values) 2) (reduce f values) nil)
-              new-set (make-multiset false (ms/multiset reduced))]
+        (let [values (or (:hash (:value msg)) (:multiset (:value msg)))
+              reduced (if initial
+                        (if (>= (count values) 1) (reduce f (first initial) values) nil)
+                        (if (>= (count values) 2) (reduce f values) nil))
+              new-set (make-multiset (ms/multiset reduced))]
           (doseq [sub @subscribers]
             (>!! sub {:changed? true :value new-set :from id}))
           (recur (<!! input) new-set))
@@ -613,7 +614,12 @@
          (make-reduce-node f)
          (v/make-signal))
      (core/reduce f arg)))
-  ([f val coll] (core/reduce f val coll)))
+  ([f val coll]
+   (if (v/signal? coll)
+     (-> (v/value coll)
+         (make-reduce-node f val)
+         (v/make-signal))
+     (core/reduce f val coll))))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
 ;; nodes depend on a throttle signal and one or more other signals.
@@ -647,7 +653,7 @@
 
 (defmacro print-signal
   [signal]
-  `(do-apply #(println (quote ~signal) ": " %) ~signal))
+  `(do-apply #(locking *out* (println (quote ~signal) ": " %)) ~signal))
 
 (core/defn -main
   [& args]

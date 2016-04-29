@@ -55,7 +55,9 @@
 ;(t/defsig direction-count (t/multiplicities (t/throttle directions 1000)))
 ;(t/print-signal direction-count)
 
-(t/defsig max-direction (t/reduce (fn [l r] (if (> (second l) (second r)) l r)) direction-count))
+(t/defsig max-direction (t/reduce #(if (> (second %1) (second %2)) %1 %2)
+                                  [nil -1]
+                                  direction-count))
 (t/print-signal max-direction)
 
 ;(t/print-signal (t/throttle max-direction 1000))
