@@ -90,42 +90,94 @@
 ;; TODO: develop this further so operations can detect if there is a multiset or not
 ;; (deftype MultiSet [keyed? mset])
 
-;; TODO: accessor functions
-;; TODO: assert keyed is false or a keyword
+(comment
+  ;; TODO: accessor functions
+  ;; TODO: assert keyed is false or a keyword
+  (core/defn make-multiset
+    ([] (make-multiset false (ms/multiset)))
+    ([keyed?] (make-multiset keyed? (ms/multiset)))
+    ([keyed? mset] {:type   ::multiset
+                    :keyed? keyed?
+                    :key    keyed?
+                    :mset   mset}))
+
+  (core/defn multiset?
+    [x]
+    (= ::multiset (:type x)))
+
+  (core/defn multiset-keyed?
+    [x]
+    (and (multiset? x)
+         (:keyed? x)))
+
+  (core/defn multiset-get
+    [set val]
+    (if (multiset-keyed? set)
+      (let [r (filter #(= (get % (:key set)) val) (:mset set))]
+        (if r
+          (first r)
+          false))
+      nil))
+
+  (core/defn multiset-insert
+    [set value]
+    (if (multiset-keyed? set)
+      (make-multiset (:key set)
+                     (if-let [e (multiset-get set (get value (:key set)))]
+                       (conj (disj (:mset set) e) value)
+                       (conj (:mset set) value)))
+      (make-multiset false (conj (:mset set) value)))))
+
+(core/defn make-hash
+  [key]
+  {:type ::hash :key key :hash {}})
+
+(core/defn hash?
+  [x]
+  (= (:type x) ::hash))
+
+(core/defn hash-key
+  [x]
+  (:key x))
+
+(core/defn hash-contains?
+  [hash key-val]
+  (let [hash (:hash hash)]
+    (contains? hash key-val)))
+
+(core/defn hash-get
+  [hash key-val]
+  (let [hash (:hash hash)]
+    (get hash key-val)))
+
+;; TODO: dissoc key in val
+(core/defn hash-insert
+  [hash key-val val]
+  (assoc (:hash hash) key-val val))
+
 (core/defn make-multiset
-  ([] (make-multiset false (ms/multiset)))
-  ([keyed?] (make-multiset keyed? (ms/multiset)))
-  ([keyed? mset] {:type ::multiset
-                  :keyed? keyed?
-                  :key keyed?
-                  :mset mset}))
+  ([]
+   (make-multiset (ms/multiset)))
+  ([multiset]
+   {:type ::multiset :multiset multiset}))
 
 (core/defn multiset?
   [x]
-  (= ::multiset (:type x)))
+  (= (:type x) ::multiset))
 
-(core/defn multiset-keyed?
-  [x]
-  (and (multiset? x)
-       (:keyed? x)))
+(core/defn multiset-contains?
+  [ms val]
+  (contains? (:multiset ms) val))
 
-(core/defn multiset-get
-  [set val]
-  (if (multiset-keyed? set)
-    (let [r (filter #(= (get % (:key set)) val) (:mset set))]
-      (if r
-        (first r)
-        false))
-    nil))
+(core/defn multiset-multiplicities
+  [ms]
+  (ms/multiplicities (:multiset ms)))
 
 (core/defn multiset-insert
-  [set value]
-  (if (multiset-keyed? set)
-    (make-multiset (:key set)
-                   (if-let [e (multiset-get set (get value (:key set)))]
-                     (conj (disj (:mset set) e) value)
-                     (conj (:mset set) value)))
-    (make-multiset false (conj (:mset set) value))))
+  [ms val]
+  (-> (:multiset ms)
+      (conj val)
+      (make-multiset)))
 
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
@@ -169,6 +221,8 @@
 
 ;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
 
+;; TODO: implement leasing, data accumulation, etc, in the source nodes
+;; TODO: priority queue for leasing
 (core/defn make-source-node
   []
   (let [in (chan)
@@ -431,6 +485,7 @@
             (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))))
     (Node. sub-chan id false)))
 
+;; TODO: deal with keyed multisets
 (core/defn make-buffer-node
   [input-node size]
   (let [id (new-id!)
@@ -593,8 +648,12 @@
   [& args]
   (comment (println "") (println "") (println ""))
 
-  (let [r (make-redis "localhost" "testqueue")]
-    (print-signal (buffer (filter even? r) 4)))
+  (let [r (make-redis "localhost" "testqueue" :key :id)]
+    #_(print-signal (buffer (filter even? r) 4))
+    (print-signal (buffer r 3))
+    ;;(print-signal (delay (buffer r 4)))
+
+    )
 
   #_(let [r (make-redis "localhost" "bxlqueue")
         f (filter even? r)
