@@ -150,10 +150,9 @@
   (let [hash (:hash hash)]
     (get hash key-val)))
 
-;; TODO: dissoc key in val
 (core/defn hash-insert
   [hash key-val val]
-  (assoc (:hash hash) key-val val))
+  (assoc (:hash hash) key-val (dissoc val (:key hash))))
 
 (core/defn make-multiset
   ([]
