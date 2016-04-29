@@ -90,74 +90,29 @@
 ;; TODO: develop this further so operations can detect if there is a multiset or not
 ;; (deftype MultiSet [keyed? mset])
 
-(comment
-  ;; TODO: accessor functions
-  ;; TODO: assert keyed is false or a keyword
-  (core/defn make-multiset
-    ([] (make-multiset false (ms/multiset)))
-    ([keyed?] (make-multiset keyed? (ms/multiset)))
-    ([keyed? mset] {:type   ::multiset
-                    :keyed? keyed?
-                    :key    keyed?
-                    :mset   mset}))
-
-  (core/defn multiset?
-    [x]
-    (= ::multiset (:type x)))
-
-  (core/defn multiset-keyed?
-    [x]
-    (and (multiset? x)
-         (:keyed? x)))
-
-  (core/defn multiset-get
-    [set val]
-    (if (multiset-keyed? set)
-      (let [r (filter #(= (get % (:key set)) val) (:mset set))]
-        (if r
-          (first r)
-          false))
-      nil))
-
-  (core/defn multiset-insert
-    [set value]
-    (if (multiset-keyed? set)
-      (make-multiset (:key set)
-                     (if-let [e (multiset-get set (get value (:key set)))]
-                       (conj (disj (:mset set) e) value)
-                       (conj (:mset set) value)))
-      (make-multiset false (conj (:mset set) value)))))
-
 (core/defn make-hash
-  ([key]
-   (make-hash key {}))
-  ([key hash]
-   {:type ::hash :key key :hash hash}))
+  ([]
+    (make-hash {}))
+  ([hash]
+    {:type ::hash :hash hash}))
 
 (core/defn hash?
   [x]
   (= (:type x) ::hash))
 
-(core/defn hash-key
-  [x]
-  (:key x))
-
 (core/defn hash-contains?
-  [hash key-val]
+  [hash key]
   (let [hash (:hash hash)]
-    (contains? hash key-val)))
+    (contains? hash key)))
 
 (core/defn hash-get
-  [hash key-val]
+  [hash key]
   (let [hash (:hash hash)]
-    (get hash key-val)))
+    (get hash key)))
 
 (core/defn hash-insert
-  ([hash val]
-   (let [key (:key hash)]
-     (make-hash key (assoc (:hash hash) (get val key) (dissoc val key)))))
-  ([hash key-val val]
-   (make-hash (:key hash) (assoc (:hash hash) key-val (dissoc val (:key hash))))))
+  [hash key val]
+  (make-hash (assoc (:hash hash) key val)))
 
 (core/defn hash->set
   [hash]
@@ -376,8 +331,9 @@
                   new-element (first (cs/difference new-set previous-set))
                   delayed (if-let [existing (hash-get previous (first new-element))]
                             (hash-insert delayed (first new-element) existing)
-                            (or delayed (make-hash (hash-key (:value msg)))))]
-              (println delayed)
+                            (or delayed (make-hash)))]
+              (doseq [sub @subscribers]
+                (>!! sub {:changed? true :value delayed :from id}))
               (recur (<!! input) (:value msg) delayed))
 
             :else
@@ -536,10 +492,12 @@
         pool (JedisPool. host)
         conn (.getResource pool)]
     (>!! (:in *coordinator*) {:new-source (:in node)})
-    (threadloop [values (if key (make-hash key) (make-multiset))]
+    (threadloop [values (if key (make-hash) (make-multiset))]
       (let [v (second (.blpop conn 0 (into-array String [queue])))
             parsed (edn/read-string v)
-            values ((if key hash-insert multiset-insert) values parsed)]
+            values (if key
+                     (hash-insert values (get parsed key) (dissoc parsed key))
+                     (multiset-insert values parsed))]
         (>!! (:in *coordinator*) {:destination id :value values})
         (recur values)))
     (v/make-signal node)))
@@ -653,14 +611,18 @@
   [& args]
   (comment (println "") (println "") (println ""))
 
-  (let [rh (make-redis "localhost" "tqh" :key :id)]
+  (let [rh (make-redis "localhost" "tqh" :key :id)
+        delayed (delay rh)]
     #_(print-signal (buffer (filter even? r) 4))
-    (print-signal (delay rh))
+    (print-signal rh)
+    (print-signal delayed)
     ;;(print-signal (delay (buffer r 4)))
     )
 
-  (let [rms (make-redis "localhost" "tqms")]
-    (print-signal (delay rms)))
+  (let [rms (make-redis "localhost" "tqms")
+        delayed (delay rms)]
+    (print-signal rms)
+    (print-signal delayed))
 
   (println "Ready")
 
