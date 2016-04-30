@@ -18,37 +18,41 @@
 
        ~@body)))
 
+(defn send-to-source
+  [value]
+  (>!! *source-chan* {:destination *source-id* :value value}))
+
 (facts
   "about make-delay-node"
   (facts
     "about make-delay-node with multisets"
     (test-node #(core/make-delay-node %)
-      (>!! *source-chan* {:destination *source-id* :value (core/make-multiset (ms/multiset))})
+      (send-to-source (core/make-multiset (ms/multiset)))
       (:multiset (:value (<!! *test-chan*))) => (ms/multiset)
 
-      (>!! *source-chan* {:destination *source-id* :value (core/make-multiset (ms/multiset 1))})
+      (send-to-source (core/make-multiset (ms/multiset 1)))
       (:multiset (:value (<!! *test-chan*))) => (ms/multiset)
 
-      (>!! *source-chan* {:destination *source-id* :value (core/make-multiset (ms/multiset 1 2))})
+      (send-to-source (core/make-multiset (ms/multiset 1 2)))
       (:multiset (:value (<!! *test-chan*))) => (ms/multiset 1)
 
-      (>!! *source-chan* {:destination *source-id* :value (core/make-multiset (ms/multiset 1 2 3))})
+      (send-to-source (core/make-multiset (ms/multiset 1 2 3)))
       (:multiset (:value (<!! *test-chan*))) => (ms/multiset 1 2)))
-  
+
   (facts
     "about make-delay-node with hashes"
     (test-node #(core/make-delay-node %)
-      (>!! *source-chan* {:destination *source-id* :value (core/make-hash {})})
+      (send-to-source (core/make-hash {}))
       (:hash (:value (<!! *test-chan*))) => {}
 
-      (>!! *source-chan* {:destination *source-id* :value (core/make-hash {1 {:v 1}})})
+      (send-to-source (core/make-hash {1 {:v 1}}))
       (:hash (:value (<!! *test-chan*))) => {}
 
-      (>!! *source-chan* {:destination *source-id* :value (core/make-hash {1 {:v 1} 2 {:v 1}})})
+      (send-to-source (core/make-hash {1 {:v 1} 2 {:v 1}}))
       (:hash (:value (<!! *test-chan*))) => {}
 
-      (>!! *source-chan* {:destination *source-id* :value (core/make-hash {1 {:v 2} 2 {:v 1}})})
+      (send-to-source (core/make-hash {1 {:v 2} 2 {:v 1}}))
       (:hash (:value (<!! *test-chan*))) => {1 {:v 1}}
 
-      (>!! *source-chan* {:destination *source-id* :value (core/make-hash {1 {:v 2} 2 {:v 2}})})
+      (send-to-source (core/make-hash {1 {:v 2} 2 {:v 2}}))
       (:hash (:value (<!! *test-chan*))) => {1 {:v 1} 2 {:v 1}})))
