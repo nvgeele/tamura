@@ -63,3 +63,19 @@
       (receive-hash) => {1 {:v 1}}
 
       (send-to-source (core/make-hash {1 {:v 2} 2 {:v 2}}))
+      (receive-hash) => {1 {:v 1} 2 {:v 1}})))
+
+(facts
+  "about make-multiplicities-node"
+  (test-node #(core/make-multiplicities-node %)
+    (send-to-source (core/make-multiset (ms/multiset)))
+    (receive-multiset) => (ms/multiset)
+
+    (send-to-source (core/make-multiset (ms/multiset 'a)))
+    (receive-multiset) => (ms/multiset ['a 1])
+
+    (send-to-source (core/make-multiset (ms/multiset 'a 'b)))
+    (receive-multiset) => (ms/multiset ['a 1] ['b 1])
+
+    (send-to-source (core/make-multiset (ms/multiset 'a 'b 'b)))
+    (receive-multiset) => (ms/multiset ['a 1] ['b 2])))
