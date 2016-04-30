@@ -193,26 +193,29 @@
 
 ;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
 
-;; TODO: implement leasing, data accumulation, etc, in the source nodes
+;; TODO: implement leasing in the source nodes
 ;; TODO: priority queue for leasing
 (core/defn make-source-node
-  []
+  [type]
   (let [in (chan)
         id (new-id!)]
     (go-loop [msg (<!! in)
               subs []
-              value nil]
+              value (if (= type ::multiset) (make-multiset) (make-hash))]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
              {:subscribe subscriber}
              (recur (<!! in) (cons subscriber subs) value)
 
              {:destination id :value new-value}
-             (do (doseq [sub subs]
-                   (>!! sub {:changed? true
-                             :value new-value
-                             :origin id}))
-                 (recur (<!! in) subs {:v new-value}))
+             (let [new-coll (if (= type ::multiset)
+                              (multiset-insert value new-value)
+                              (hash-insert value (first new-value) (second new-value)))]
+               (doseq [sub subs]
+                 (>!! sub {:changed? true
+                           :value    new-coll
+                           :origin   id}))
+               (recur (<!! in) subs new-coll))
 
              {:destination _}
              (do (doseq [sub subs]
@@ -420,6 +423,7 @@
     (Node. sub-chan id false)))
 
 ;; TODO: assert input is a multiset
+;; TODO: output as a hash?
 (core/defn make-multiplicities-node
   [input-node]
   (let [id (new-id!)
@@ -554,7 +558,7 @@
 ;; TODO: error if key not present
 (core/defn make-redis
   [host queue & {:keys [key] :or {key false}}]
-  (let [node (make-source-node)
+  (let [node (make-source-node (if key ::hash ::multiset))
         id (:id node)
         pool (JedisPool. host)
         conn (.getResource pool)]
@@ -562,10 +566,10 @@
     (threadloop [values (if key (make-hash) (make-multiset))]
       (let [v (second (.blpop conn 0 (into-array String [queue])))
             parsed (edn/read-string v)
-            values (if key
-                     (hash-insert values (get parsed key) (dissoc parsed key))
-                     (multiset-insert values parsed))]
-        (>!! (:in *coordinator*) {:destination id :value values})
+            value (if key
+                    [(get parsed key) (dissoc parsed key)]
+                    parsed)]
+        (>!! (:in *coordinator*) {:destination id :value value})
         (recur values)))
     (v/make-signal node)))
 
@@ -662,12 +666,12 @@
 (core/defn throttle
   [signal ms]
   (if (v/signal? signal)
-    (let [source-node (make-source-node)
+    (let [source-node (make-source-node ::multiset)
           throttle-node (make-throttle-node (v/value signal) source-node)]
       (>!! (:in *coordinator*) {:new-source (:in source-node)})
       (threadloop []
         (Thread/sleep ms)
-        (>!! (:in *coordinator*) {:destination (:id source-node) :value true})
+        (>!! (:in *coordinator*) {:destination (:id source-node) :value nil})
         (recur))
       (v/make-signal throttle-node))
     (throw (Exception. "first argument of throttle must be signal"))))
