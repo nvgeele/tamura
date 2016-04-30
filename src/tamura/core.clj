@@ -235,6 +235,12 @@
   [inputs]
   (map subscribe-input inputs))
 
+;; TODO: use this in all nodes
+(core/defn send-subscribers
+  [subscribers changed? value id]
+  (doseq [sub @subscribers]
+    (>!! sub {:changed? changed? :value value :from id})))
+
 ;; TODO: for generic node construction
 (defmacro defnode
   [name inputs bindings & body]
@@ -485,11 +491,6 @@
               (>!! sub {:changed? false :value (:value msg) :from id}))
             (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))))
     (Node. sub-chan id false)))
-
-(core/defn send-subscribers
-  [subscribers changed? value id]
-  (doseq [sub @subscribers]
-    (>!! sub {:changed? changed? :value value :from id})))
 
 ;; TODO: deal with removals in chained buffers and so on (also, leasing)
 (core/defn make-buffer-node
