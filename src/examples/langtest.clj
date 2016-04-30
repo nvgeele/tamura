@@ -5,9 +5,10 @@
 
 ;; (t/def x 1)
 
-(t/defsig in (t/make-redis "localhost" "bxlqueue"))
-(t/map println in)
-((t/lift println) in)
+(comment
+  (t/defsig in (t/make-redis "localhost" "bxlqueue"))
+  (t/map println in)
+  ((t/lift println) in))
 
 ;; (t/defn y [x] (+ x x))
 

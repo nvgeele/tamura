@@ -1,7 +1,28 @@
 (ns tamura.core-test
-  (:require [clojure.test :refer :all]
-            [tamura.core :refer :all]))
+  (:use midje.sweet)
+  (:require [tamura.core :as core]
+            [clojure.core.async :as a :refer [>!! <!!]]))
 
-(deftest a-test
-  (testing "FIXME, I fail."
-    (is (= 0 1))))
+(defn make-test-input
+  [])
+
+(facts
+  "about make-delay-node"
+  (facts
+    "about make-delay-node with multisets"
+    (let [source-node (core/make-source-node)
+          delay-node (core/make-delay-node source-node)
+          test-channel (core/chan)]
+      (core/node-subscribe delay-node test-channel)
+
+      (println (:in source-node))
+
+      :truth => :truth
+
+      ;(>!! test-channel {:destination})
+
+      )
+    )
+  (facts
+    "about make-delay-node with hashes"
+    ))
