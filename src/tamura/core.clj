@@ -119,6 +119,10 @@
   [hash key val]
   (make-hash (assoc (:hash hash) key val)))
 
+(core/defn hash-remove
+  [hash key]
+  (make-hash (dissoc (:hash hash) key)))
+
 (core/defn hash->set
   [hash]
   (set (:hash hash)))
@@ -146,9 +150,6 @@
   (-> (:multiset ms)
       (conj val)
       (make-multiset)))
-
-;; TODO: remove these one done
-(core/defn multiset-get [set val] (throw (Exception. "I'm not supposed to be used")))
 
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
@@ -346,6 +347,7 @@
     (Node. sub-chan id false)))
 
 ;; TODO: put in docstring that it emits empty hash or set
+;; TODO: make sure it still works with leasing
 (core/defn make-delay-node
   [input-node]
   (let [id (new-id!)
@@ -484,7 +486,12 @@
             (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))))
     (Node. sub-chan id false)))
 
-;; TODO: deal with keyed multisets
+(core/defn send-subscribers
+  [subscribers changed? value id]
+  (doseq [sub @subscribers]
+    (>!! sub {:changed? changed? :value value :from id})))
+
+;; TODO: deal with removals in chained buffers and so on (also, leasing)
 (core/defn make-buffer-node
   [input-node size]
   (let [id (new-id!)
@@ -493,28 +500,49 @@
         input (subscribe-input input-node)]
     (subscriber-loop sub-chan subscribers)
     (go-loop [msg (<!! input)
-              previous-set nil
+              previous nil
               buffer-list (LinkedList.)
               buffer nil]
       (log/debug (str "buffer-node " id " has received: " msg))
-      (if (:changed? msg)
-        (let [new-element (if previous-set
-                            (first (ms/minus (:mset (:value msg)) (:mset previous-set)))
-                            (first (:mset (:value msg))))]
-          (when (= (count buffer-list) size)
-            (.removeLast buffer-list))
-          (if new-element
-            (do (.addFirst buffer-list new-element)
-                (let [buffer (make-multiset (:key (:value msg)) (apply ms/multiset buffer-list))]
-                  (doseq [sub @subscribers]
-                    (>!! sub {:changed? true :value buffer :from id}))
-                  (recur (<!! input) (:value msg) buffer-list buffer)))
+
+      (cond (and (:changed? msg) (multiset? (:value msg)))
+            (let [new-element (if previous
+                                (first (ms/minus (:multiset (:value msg)) previous))
+                                (first (:multiset (:value msg))))]
+              (when (= (count buffer-list) size)
+                (.removeLast buffer-list))
+              (if new-element
+                (do (.addFirst buffer-list new-element)
+                    (let [buffer (make-multiset (apply ms/multiset buffer-list))]
+                      (send-subscribers subscribers true buffer id)
+                      (recur (<!! input) (:multiset (:value msg)) buffer-list buffer)))
+                (do (send-subscribers subscribers true buffer id)
+                    (recur (<!! input) (:multiset (make-multiset)) buffer-list buffer))))
+
+            (:changed? msg)
+            (let [new-set (hash->set (:value msg))
+                  previous-set (hash->set previous)
+                  new-element (first (cs/difference new-set previous-set))
+                  new-key  (first new-element)]
+              (if (hash-contains? buffer new-key)
+                (let [buffer (hash-insert buffer new-key (second new-element))]
+                  (.remove buffer-list (.indexOf buffer-list new-key))
+                  (.addFirst buffer-list new-key)
+                  (send-subscribers subscribers true buffer id)
+                  (recur (<!! input) (:value msg) buffer-list buffer))
+                (let [buffer (-> (or buffer (make-hash))
+                                 (#(if (= (count buffer-list) size)
+                                    (hash-remove % (.removeLast buffer-list))
+                                    %))
+                                 (hash-insert new-key (second new-element)))]
+                  (.addFirst buffer-list new-key)
+                  (send-subscribers subscribers true buffer id)
+                  (recur (<!! input) (:value msg) buffer-list buffer))))
+
+            :else
             (do (doseq [sub @subscribers]
-                  (>!! sub {:changed? true :value buffer :from id}))
-                (recur (<!! input) (:value msg) buffer-list buffer))))
-        (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value buffer :from id}))
-            (recur (<!! input) previous-set buffer-list buffer))))
+                  (>!! sub {:changed? false :value buffer :from id}))
+                (recur (<!! input) previous buffer-list buffer))))
     (Node. sub-chan id false)))
 
 (def ^:dynamic *coordinator* (make-coordinator))
@@ -664,15 +692,19 @@
   [& args]
   (let [rh (make-redis "localhost" "tqh" :key :id)
         delayed (delay rh)
-        zipped (zip rh delayed)]
+        zipped (zip rh delayed)
+        buffered (buffer rh 3)]
     ;(print-signal rh)
     ;(print-signal delayed)
-    (print-signal zipped)
+    ;(print-signal zipped)
+    (print-signal buffered)
     )
 
   (let [rms (make-redis "localhost" "tqms")
-        delayed (delay rms)]
-    (print-signal rms)
-    (print-signal delayed))
+        delayed (delay rms)
+        buffered (buffer rms 3)]
+    ;(print-signal rms)
+    ;(print-signal delayed)
+    (print-signal buffered))
 
   (println "Ready"))

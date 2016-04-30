@@ -74,6 +74,7 @@
 ;; TODO: waarom sets juist?
 ;; TODO: static architecture
 ;; TODO: make nodes testable
+;; TODO: steek datatype van een signal in de signal metadata
 
 (comment (map-multiset (fn [key value]
                          (return new-value-for-key))
