@@ -2,10 +2,12 @@
   (:require [clojure.core :as core]
             [clojure.core.async :as a :refer [>!! <!! go go-loop]]
             [clojure.core.match :refer [match]]
+            [clojure.data.priority-map :as pm]
             [clojure.edn :as edn]
             [clojure.set :as cs]
             [clojure.string :refer [upper-case]]
             [clojure.tools.logging :as log]
+            [clj-time.core :as t]
             [multiset.core :as ms]
             [potemkin :as p]
             [tamura.macros :as macros]
@@ -151,6 +153,12 @@
       (conj val)
       (make-multiset)))
 
+(core/defn multiset-remove
+  [ms val]
+  (-> (:multiset ms)
+      (disj val)
+      (make-multiset)))
+
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
 ;; TODO: let coordinator keep list of producers, so we can have something like (coordinator-start) to kick-start errting
@@ -195,37 +203,58 @@
 
 ;; TODO: implement leasing in the source nodes
 ;; TODO: priority queue for leasing
+;; TODO: timeout must be a period (e.g. t/minutes)
+;; TODO: leasing when no data has changed?
+;; TODO: ping node to do leasing now and then
 (core/defn make-source-node
-  [type]
+  [type & {:keys [timeout] :or {timeout false}}]
   (let [in (chan)
         id (new-id!)]
     (go-loop [msg (<!! in)
               subs []
+              pm (pm/priority-map)
               value (if (= type ::multiset) (make-multiset) (make-hash))]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
-             {:subscribe subscriber}
-             (recur (<!! in) (cons subscriber subs) value)
+        {:subscribe subscriber}
+        (recur (<!! in) (cons subscriber subs) pm value)
 
-             {:destination id :value new-value}
-             (let [new-coll (if (= type ::multiset)
-                              (multiset-insert value new-value)
-                              (hash-insert value (first new-value) (second new-value)))]
-               (doseq [sub subs]
-                 (>!! sub {:changed? true
-                           :value    new-coll
-                           :origin   id}))
-               (recur (<!! in) subs new-coll))
+        {:destination id :value new-value}
+        (let [now (t/now)
+              cutoff (when timeout (t/minus now timeout))
+              new-coll (if (= type ::multiset)
+                         (multiset-insert value new-value)
+                         (hash-insert value (first new-value) (second new-value)))
+              new-pm (when timeout
+                       (assoc pm (if (hash? new-coll) (first new-value) new-value) now))
+              [new-coll new-pm]
+              (if timeout
+                (loop [pm new-pm
+                       coll new-coll]
+                  (let [[v t] (peek pm)]
+                    (if (t/before? t cutoff)
+                      (let [coll (if (= type ::multiset)
+                                   (multiset-remove coll v)
+                                   (hash-remove coll v))
+                            pm (pop pm)]
+                        (recur pm coll))
+                      [coll pm])))
+                [new-coll nil])]
+          (doseq [sub subs]
+            (>!! sub {:changed? true
+                      :value    new-coll
+                      :origin   id}))
+          (recur (<!! in) subs new-pm new-coll))
 
-             {:destination _}
-             (do (doseq [sub subs]
-                   (>!! sub {:changed? false
-                             :value value
-                             :origin id}))
-                 (recur (<!! in) subs value))
+        {:destination _}
+        (do (doseq [sub subs]
+              (>!! sub {:changed? false
+                        :value    value
+                        :origin   id}))
+            (recur (<!! in) subs pm value))
 
-             ;; TODO: error?
-             :else (recur (<!! in) subs value)))
+        ;; TODO: error?
+        :else (recur (<!! in) subs pm value)))
     (Source. in in id true)))
 
 (core/defn subscribe-input
@@ -264,6 +293,7 @@
 ;; Possible solution: an inputs-seen flag of some sorts?
 
 ;; TODO: construction finish detection
+;; TODO: test
 (core/defn make-map-hash-node
   [input-node f]
   (let [id (new-id!)
@@ -282,7 +312,7 @@
                                             (let [[k v] (f v)]
                                               (assoc h k v)))
                                           {}
-                                          hash))]
+                                          values))]
           (doseq [sub @subscribers]
             (>!! sub {:changed? true :value new-hash :from id}))
           (recur (<!! input) new-hash))
