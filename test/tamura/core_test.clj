@@ -45,10 +45,13 @@
 
 ;; TODO: tests for data structures?
 
-(facts
-  "about leasing"
-  (facts
-    "about leasing multiset source nodes"
+;; TODO: tests for delay after buffer?
+;; TODO: tests for buffer after delay?
+
+;; TODO: tests for buffer
+
+(facts "about leasing"
+  (facts "about leasing multiset source nodes"
     (test-node ::core/multiset
       (t/seconds 10)
       false
@@ -70,8 +73,7 @@
 
       (send-to-source 4)
       (receive-multiset) => (ms/multiset 4)))
-  (facts
-    "about leasing hash source nodes"
+  (facts "about leasing hash source nodes"
     (test-node ::core/hash
       (t/seconds 10)
       false
@@ -96,8 +98,7 @@
 
       (send-to-source [:a 1])
       (receive-hash) => {:a 1}))
-  (facts
-    "about delay after leased hash source node"
+  (facts "about delay after leased hash source node"
     (test-node ::core/hash
       (t/seconds 10)
       #(core/make-delay-node %)
@@ -123,8 +124,7 @@
 
       (send-to-source [:a 3])
       (receive-hash) => {:b 1}))
-  (facts
-    "about delay after leased multiset source node"
+  (facts "about delay after leased multiset source node"
     (test-node ::core/multiset
       (t/seconds 10)
       #(core/make-delay-node %)
@@ -148,10 +148,8 @@
       (send-to-source 5)
       (receive-multiset) => (ms/multiset 2 3 4))))
 
-(facts
-  "about make-delay-node"
-  (facts
-    "about make-delay-node with multisets"
+(facts "about make-delay-node"
+  (facts "about make-delay-node with multisets"
     (test-multiset-node #(core/make-delay-node %)
       (send-to-source 1)
       (receive-multiset) => (ms/multiset)
@@ -161,8 +159,7 @@
 
       (send-to-source 3)
       (receive-multiset) => (ms/multiset 1 2)))
-  (facts
-    "about make-delay-node with hashes"
+  (facts "about make-delay-node with hashes"
     (test-hash-node #(core/make-delay-node %)
       (send-to-source [1 {:v 1}])
       (receive-hash) => {}
@@ -176,8 +173,7 @@
       (send-to-source [2 {:v 2}])
       (receive-hash) => {1 {:v 1} 2 {:v 1}})))
 
-(facts
-  "about make-multiplicities-node"
+(facts "about make-multiplicities-node"
   (test-multiset-node #(core/make-multiplicities-node %)
     (send-to-source 'a)
     (receive-multiset) => (ms/multiset ['a 1])
