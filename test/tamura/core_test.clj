@@ -96,34 +96,33 @@
 
       (send-to-source [:a 1])
       (receive-hash) => {:a 1}))
-  (comment
-    (facts
-      "about delay after leased hash source node"
-      (test-node ::core/hash
-        (t/seconds 10)
-        #(core/make-delay-node %)
+  (facts
+    "about delay after leased hash source node"
+    (test-node ::core/hash
+      (t/seconds 10)
+      #(core/make-delay-node %)
 
-        (send-to-source [:a 1])
-        (receive-hash) => {}
+      (send-to-source [:a 1])
+      (receive-hash) => {}
 
-        (send-to-source [:b 1])
-        (receive-hash) => {}
+      (send-to-source [:b 1])
+      (receive-hash) => {}
 
-        (send-to-source [:a 2])
-        (receive-hash) => {:a 1}
+      (send-to-source [:a 2])
+      (receive-hash) => {:a 1}
 
-        (Thread/sleep 3000)
+      (Thread/sleep 3000)
 
-        (send-to-source [:b 2])
-        (receive-hash) => {:a 1 :b 1}
+      (send-to-source [:b 2])
+      (receive-hash) => {:a 1 :b 1}
 
-        (Thread/sleep 8000)
+      (Thread/sleep 8000)
 
-        (send-to-source [:c 1])
-        (receive-hash) => {:b 1}
+      (send-to-source [:c 1])
+      (receive-hash) => {:b 1}
 
-        (send-to-source [:a 3])
-        (receive-hash) => {:b 1})))
+      (send-to-source [:a 3])
+      (receive-hash) => {:b 1}))
   (facts
     "about delay after leased multiset source node"
     (test-node ::core/multiset

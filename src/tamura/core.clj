@@ -438,12 +438,16 @@
               (recur (<!! input) nil (multiset-union delayed added)))
 
             (:changed? msg)
-            (let [new-set (hash->set (:value msg))
+            (let [previous-keys (set (hash-keys previous))
+                  new-keys (set (hash-keys (:value msg)))
+                  removed-keys (cs/difference previous-keys new-keys)
+                  new-set (hash->set (:value msg))
                   previous-set (hash->set previous)
                   new-element (first (cs/difference new-set previous-set))
                   delayed (if-let [existing (hash-get previous (first new-element))]
                             (hash-insert delayed (first new-element) existing)
-                            (or delayed (make-hash)))]
+                            (or delayed (make-hash)))
+                  delayed (reduce #(hash-remove %1 %2) delayed removed-keys)]
               (doseq [sub @subscribers]
                 (>!! sub {:changed? true :value delayed :from id}))
               (recur (<!! input) (:value msg) delayed))
@@ -739,6 +743,7 @@
       (v/make-signal throttle-node))
     (throw (Exception. "first argument of throttle must be signal"))))
 
+;; TODO: corner case size 0
 (core/defn buffer
   [sig size]
   (if (v/signal? sig)
