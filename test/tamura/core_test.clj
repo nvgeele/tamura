@@ -31,9 +31,12 @@
   [node-init & body]
   `(test-node ::core/hash false ~node-init ~@body))
 
+;; TODO: rename to send
 (defn send-to-source
   [value]
   (>!! *source-chan* {:destination *source-id* :value value}))
+
+(def send send-to-source)
 
 (defn receive-hash
   []
@@ -156,25 +159,26 @@
       (t/seconds 10)
       #(core/make-buffer-node % 2)
 
-      (comment
-        {:a 1}            => {:a 1}
-        {:a 1 :b 1}       => {:a 1 :b 1}
-        {:a 1 :b 1 :c 1}  => {:b 1 :c 1}
-        {:d 1}            => {:d 1}
-        {:d 1 :e 1}       => {:d 1 :e 1})
+      (send [:a 1])
+      (receive) => {:a 1}
 
-      ))
+      (send [:b 1])
+      (receive) => {:a 1 :b 1}
+
+      (send [:c 1])
+      (receive) => {:b 1 :c 1}
+
+      (Thread/sleep 11000)
+
+      (send [:d 1])
+      (receive) => {:d 1}
+
+      (send [:e 1])
+      (receive) => {:d 1 :e 1}))
   (facts "about buffer after leased multiset source node"
     (test-node ::core/multiset
       (t/seconds 10)
       #(core/make-buffer-node % 2)
-
-      (comment
-        #{1} => #{1}
-        #{1 2} => #{1 2}
-        #{1 2 3} => #{2 3}
-        #{4} => #{4}
-        #{4 5} => #{4 5})
 
       (send-to-source 1)
       (receive) => (ms/multiset 1)

@@ -618,10 +618,21 @@
             (let [new-set (hash->set (:value msg))
                   previous-set (hash->set previous)
                   new-element (first (cs/difference new-set previous-set))
-                  new-key  (first new-element)]
+                  new-key  (first new-element)
+                  previous-keys (set (hash-keys previous))
+                  new-keys (set (hash-keys (:value msg)))
+                  removed-keys (cs/difference previous-keys new-keys)
+                  buffer (if (empty? removed-keys)
+                           buffer
+                           (reduce (fn [buffer key]
+                                     (.remove buffer-list key)
+                                     (hash-remove buffer key))
+                                   buffer
+                                   removed-keys))]
               (if (hash-contains? buffer new-key)
                 (let [buffer (hash-insert buffer new-key (second new-element))]
-                  (.remove buffer-list (.indexOf buffer-list new-key))
+                  ;; NOTE: use (.indexOf buffer-list new-key) instead?
+                  (.remove buffer-list new-key)
                   (.addFirst buffer-list new-key)
                   (send-subscribers subscribers true buffer id)
                   (recur (<!! input) (:value msg) buffer-list buffer))
