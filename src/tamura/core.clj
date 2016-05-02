@@ -400,7 +400,7 @@
 
 ;; TODO: define similar semantics for buffers
 (comment
-  "Semantics delay, multiset, leasing/buffer"
+  "Semantics delay, multiset, after leasing/buffer"
   #{}         => #{}
   #{1}        => #{}
   #{1 2}      => #{1}
@@ -408,7 +408,7 @@
   #{2 3 4}    => #{2 3}
   #{2 3 4 5}  => #{2 3 4}
 
-  "Semantics delay, hash, leasing/buffer"
+  "Semantics delay, hash, after leasing/buffer"
   {}                => {}
   {:a 1}            => {}
   {:a 1 :b 1}       => {}
@@ -563,6 +563,23 @@
             (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))))
     (Node. sub-chan id false)))
 
+(comment
+  "Semantics buffer of size 2, multiset, after leasing/buffer"
+  #{}         => #{}
+  #{1}        => #{1}
+  #{1 2}      => #{1 2}
+  #{1 2 3}    => #{2 3}
+  #{4}        => #{4}
+  #{4 5}      => #{4 5}
+
+  "Semantics buffer of size 2, hash, after leasing/buffer"
+  {}                => {}
+  {:a 1}            => {:a 1}
+  {:a 1 :b 1}       => {:a 1 :b 1}
+  {:a 1 :b 1 :c 1}  => {:b 1 :c 1}
+  {:d 1}            => {:d 1}
+  {:d 1 :e 1}       => {:d 1 :e 1})
+
 ;; TODO: deal with removals in chained buffers and so on (also, leasing)
 (core/defn make-buffer-node
   [input-node size]
@@ -576,13 +593,19 @@
               buffer-list (LinkedList.)
               buffer nil]
       (log/debug (str "buffer-node " id " has received: " msg))
-
       (cond (and (:changed? msg) (multiset? (:value msg)))
             (let [new-element (if previous
                                 (first (ms/minus (:multiset (:value msg)) previous))
-                                (first (:multiset (:value msg))))]
+                                (first (:multiset (:value msg))))
+                  removed (if previous
+                            (ms/minus previous (:multiset (:value msg)))
+                            (ms/multiset))]
+              (when-not (empty? removed)
+                (doseq [el removed]
+                  (.remove buffer-list el)))
               (when (= (count buffer-list) size)
                 (.removeLast buffer-list))
+              ;; TODO: more efficient, thus without the apply thing
               (if new-element
                 (do (.addFirst buffer-list new-element)
                     (let [buffer (make-multiset (apply ms/multiset buffer-list))]
