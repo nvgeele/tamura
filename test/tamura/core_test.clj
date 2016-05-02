@@ -43,10 +43,12 @@
 
 ;; TODO: test a changed? false send too?
 
+;; TODO: tests for data structures?
+
 (facts
-  "about leasing in source nodes"
+  "about leasing"
   (facts
-    "about multiset source nodes"
+    "about leasing multiset source nodes"
     (test-node ::core/multiset
       (t/seconds 10)
       false
@@ -69,7 +71,7 @@
       (send-to-source 4)
       (receive-multiset) => (ms/multiset 4)))
   (facts
-    "about hash source nodes"
+    "about leasing hash source nodes"
     (test-node ::core/hash
       (t/seconds 10)
       false
@@ -93,7 +95,59 @@
       (Thread/sleep 11000)
 
       (send-to-source [:a 1])
-      (receive-hash) => {:a 1})))
+      (receive-hash) => {:a 1}))
+  (comment
+    (facts
+      "about delay after leased hash source node"
+      (test-node ::core/hash
+        (t/seconds 10)
+        #(core/make-delay-node %)
+
+        (send-to-source [:a 1])
+        (receive-hash) => {}
+
+        (send-to-source [:b 1])
+        (receive-hash) => {}
+
+        (send-to-source [:a 2])
+        (receive-hash) => {:a 1}
+
+        (Thread/sleep 3000)
+
+        (send-to-source [:b 2])
+        (receive-hash) => {:a 1 :b 1}
+
+        (Thread/sleep 8000)
+
+        (send-to-source [:c 1])
+        (receive-hash) => {:b 1}
+
+        (send-to-source [:a 3])
+        (receive-hash) => {:b 1})))
+  (facts
+    "about delay after leased multiset source node"
+    (test-node ::core/multiset
+      (t/seconds 10)
+      #(core/make-delay-node %)
+
+      (send-to-source 1)
+      (receive-multiset) => (ms/multiset)
+
+      (Thread/sleep 2000)
+
+      (send-to-source 2)
+      (receive-multiset) => (ms/multiset 1)
+
+      (send-to-source 3)
+      (receive-multiset) => (ms/multiset 1 2)
+
+      (Thread/sleep 9000)
+
+      (send-to-source 4)
+      (receive-multiset) => (ms/multiset 2 3)
+
+      (send-to-source 5)
+      (receive-multiset) => (ms/multiset 2 3 4))))
 
 (facts
   "about make-delay-node"

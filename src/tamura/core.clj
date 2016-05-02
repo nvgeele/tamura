@@ -89,8 +89,8 @@
   [bindings & body]
   `(thread (loop ~bindings ~@body)))
 
-;; TODO: develop this further so operations can detect if there is a multiset or not
-;; (deftype MultiSet [keyed? mset])
+
+;; TODO: leasing operations in datastructures?
 
 (core/defn make-hash
   ([]
@@ -157,6 +157,16 @@
   [ms val]
   (-> (:multiset ms)
       (disj val)
+      (make-multiset)))
+
+(core/defn multiset-minus
+  [l r]
+  (-> (ms/minus (:multiset l) (:multiset r))
+      (make-multiset)))
+
+(core/defn multiset-union
+  [l r]
+  (-> (ms/union (:multiset l) (:multiset r))
       (make-multiset)))
 
 ;; TODO: define some sinks
@@ -387,6 +397,26 @@
 
 ;; TODO: put in docstring that it emits empty hash or set
 ;; TODO: make sure it still works with leasing
+
+;; TODO: define similar semantics for buffers
+(comment
+  "Semantics delay, multiset, leasing/buffer"
+  #{}         => #{}
+  #{1}        => #{}
+  #{1 2}      => #{1}
+  #{1 2 3}    => #{1 2}
+  #{2 3 4}    => #{2 3}
+  #{2 3 4 5}  => #{2 3 4}
+
+  "Semantics delay, hash, leasing/buffer"
+  {}                => {}
+  {:a 1}            => {}
+  {:a 1 :b 1}       => {}
+  {:a 2 :b 1}       => {:a 1}
+  {:a 2 :b 2}       => {:a 1 :b 1}
+  {:b 2 :c 1}       => {:b 1}
+  {:b 2 :c 1 :a 3}  => {:b 1})
+
 (core/defn make-delay-node
   [input-node]
   (let [id (new-id!)
@@ -399,10 +429,13 @@
               delayed nil]
       (log/debug (str "delay-node " id " has received: " msg))
       (cond (and (:changed? msg) (multiset? (:value msg)))
-            (let [delayed (or delayed (make-multiset))]
+            (let [delayed (or delayed (make-multiset))
+                  added (multiset-minus (:value msg) delayed)
+                  removed (multiset-minus delayed (:value msg))
+                  delayed (if removed (multiset-minus delayed removed) delayed)]
               (doseq [sub @subscribers]
                 (>!! sub {:changed? true :value delayed :from id}))
-              (recur (<!! input) nil (:value msg)))
+              (recur (<!! input) nil (multiset-union delayed added)))
 
             (:changed? msg)
             (let [new-set (hash->set (:value msg))
