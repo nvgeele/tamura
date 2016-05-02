@@ -31,12 +31,9 @@
   [node-init & body]
   `(test-node ::core/hash false ~node-init ~@body))
 
-;; TODO: rename to send
-(defn send-to-source
+(defn send
   [value]
   (>!! *source-chan* {:destination *source-id* :value value}))
-
-(def send send-to-source)
 
 (defn receive-hash
   []
@@ -63,96 +60,96 @@
       (t/seconds 10)
       false
 
-      (send-to-source 1)
+      (send 1)
       (receive) => (ms/multiset 1)
 
       (Thread/sleep 5000)
 
-      (send-to-source 2)
+      (send 2)
       (receive) => (ms/multiset 1 2)
 
       (Thread/sleep 6000)
 
-      (send-to-source 3)
+      (send 3)
       (receive) => (ms/multiset 2 3)
 
       (Thread/sleep 11000)
 
-      (send-to-source 4)
+      (send 4)
       (receive) => (ms/multiset 4)))
   (facts "about leasing hash source nodes"
     (test-node ::core/hash
       (t/seconds 10)
       false
 
-      (send-to-source [:a 1])
+      (send [:a 1])
       (receive) => {:a 1}
 
       (Thread/sleep 5000)
 
-      (send-to-source [:b 1])
+      (send [:b 1])
       (receive) => {:a 1 :b 1}
 
-      (send-to-source [:a 2])
+      (send [:a 2])
       (receive) => {:a 2 :b 1}
 
       (Thread/sleep 6000)
 
-      (send-to-source [:c 1])
+      (send [:c 1])
       (receive) => {:a 2 :b 1 :c 1}
 
       (Thread/sleep 11000)
 
-      (send-to-source [:a 1])
+      (send [:a 1])
       (receive) => {:a 1}))
   (facts "about delay after leased hash source node"
     (test-node ::core/hash
       (t/seconds 10)
       #(core/make-delay-node %)
 
-      (send-to-source [:a 1])
+      (send [:a 1])
       (receive) => {}
 
-      (send-to-source [:b 1])
+      (send [:b 1])
       (receive) => {}
 
-      (send-to-source [:a 2])
+      (send [:a 2])
       (receive) => {:a 1}
 
       (Thread/sleep 3000)
 
-      (send-to-source [:b 2])
+      (send [:b 2])
       (receive) => {:a 1 :b 1}
 
       (Thread/sleep 8000)
 
-      (send-to-source [:c 1])
+      (send [:c 1])
       (receive) => {:b 1}
 
-      (send-to-source [:a 3])
+      (send [:a 3])
       (receive) => {:b 1}))
   (facts "about delay after leased multiset source node"
     (test-node ::core/multiset
       (t/seconds 10)
       #(core/make-delay-node %)
 
-      (send-to-source 1)
+      (send 1)
       (receive) => (ms/multiset)
 
       (Thread/sleep 2000)
 
-      (send-to-source 2)
+      (send 2)
       (receive) => (ms/multiset 1)
 
-      (send-to-source 3)
+      (send 3)
       (receive) => (ms/multiset 1 2)
 
       (Thread/sleep 9000)
 
-      (send-to-source 4)
+      (send 4)
       (receive) => (ms/multiset 2 3)
 
-      (send-to-source 5)
+      (send 5)
       (receive) => (ms/multiset 2 3 4)))
   (facts "about buffer after leased hash source node"
     (test-node ::core/hash
@@ -180,21 +177,21 @@
       (t/seconds 10)
       #(core/make-buffer-node % 2)
 
-      (send-to-source 1)
+      (send 1)
       (receive) => (ms/multiset 1)
 
-      (send-to-source 2)
+      (send 2)
       (receive) => (ms/multiset 1 2)
 
-      (send-to-source 3)
+      (send 3)
       (receive) => (ms/multiset 2 3)
 
       (Thread/sleep 11000)
 
-      (send-to-source 4)
+      (send 4)
       (receive) => (ms/multiset 4)
 
-      (send-to-source 5)
+      (send 5)
       (receive) => (ms/multiset 4 5))))
 
 ;; TODO: tests for delay after buffer?
@@ -202,72 +199,72 @@
 (facts "about buffer-node"
   (facts "about multiset buffer-node"
     (test-multiset-node #(core/make-buffer-node % 3)
-      (send-to-source 1)
+      (send 1)
       (receive) => (ms/multiset 1)
 
-      (send-to-source 2)
+      (send 2)
       (receive) => (ms/multiset 1 2)
 
-      (send-to-source 3)
+      (send 3)
       (receive) => (ms/multiset 1 2 3)
 
-      (send-to-source 4)
+      (send 4)
       (receive) => (ms/multiset 2 3 4)
 
-      (send-to-source 4)
+      (send 4)
       (receive) => (ms/multiset 3 4 4)))
   (facts "about hash buffer-node"
     (test-hash-node #(core/make-buffer-node % 3)
-      (send-to-source [:a 1])
+      (send [:a 1])
       (receive) => {:a 1}
 
-      (send-to-source [:b 1])
+      (send [:b 1])
       (receive) => {:a 1 :b 1}
 
-      (send-to-source [:c 1])
+      (send [:c 1])
       (receive) => {:a 1 :b 1 :c 1}
 
-      (send-to-source [:d 1])
+      (send [:d 1])
       (receive) => {:b 1 :c 1 :d 1}
 
-      (send-to-source [:b 2])
+      (send [:b 2])
       (receive) => {:b 2 :c 1 :d 1}
 
-      (send-to-source [:e 1])
+      (send [:e 1])
       (receive) => {:b 2 :d 1 :e 1})))
 
 (facts "about make-delay-node"
   (facts "about make-delay-node with multisets"
     (test-multiset-node #(core/make-delay-node %)
-      (send-to-source 1)
+      (send 1)
       (receive) => (ms/multiset)
 
-      (send-to-source 2)
+      (send 2)
       (receive) => (ms/multiset 1)
 
-      (send-to-source 3)
+      (send 3)
       (receive) => (ms/multiset 1 2)))
   (facts "about make-delay-node with hashes"
     (test-hash-node #(core/make-delay-node %)
-      (send-to-source [1 {:v 1}])
+      (send [1 {:v 1}])
       (receive) => {}
 
-      (send-to-source [2 {:v 1}])
+      (send [2 {:v 1}])
       (receive) => {}
 
-      (send-to-source [1 {:v 2}])
+      (send [1 {:v 2}])
       (receive) => {1 {:v 1}}
 
-      (send-to-source [2 {:v 2}])
+      (send [2 {:v 2}])
       (receive) => {1 {:v 1} 2 {:v 1}})))
 
 (facts "about make-multiplicities-node"
   (test-multiset-node #(core/make-multiplicities-node %)
-    (send-to-source 'a)
+    (send 'a)
     (receive) => (ms/multiset ['a 1])
 
-    (send-to-source 'b)
+    (send 'b)
     (receive) => (ms/multiset ['a 1] ['b 1])
 
-    (send-to-source 'b)
+    (send 'b)
     (receive) => (ms/multiset ['a 1] ['b 2])))
