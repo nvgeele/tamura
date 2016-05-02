@@ -57,35 +57,35 @@
 (facts "about leasing"
   (facts "about leasing multiset source nodes"
     (test-node ::core/multiset
-      (t/seconds 10)
+      (t/seconds 2)
       false
 
       (send 1)
       (receive) => (ms/multiset 1)
 
-      (Thread/sleep 5000)
+      (Thread/sleep 1000)
 
       (send 2)
       (receive) => (ms/multiset 1 2)
 
-      (Thread/sleep 6000)
+      (Thread/sleep 1100)
 
       (send 3)
       (receive) => (ms/multiset 2 3)
 
-      (Thread/sleep 11000)
+      (Thread/sleep 3000)
 
       (send 4)
       (receive) => (ms/multiset 4)))
   (facts "about leasing hash source nodes"
     (test-node ::core/hash
-      (t/seconds 10)
+      (t/seconds 2)
       false
 
       (send [:a 1])
       (receive) => {:a 1}
 
-      (Thread/sleep 5000)
+      (Thread/sleep 1000)
 
       (send [:b 1])
       (receive) => {:a 1 :b 1}
@@ -93,18 +93,18 @@
       (send [:a 2])
       (receive) => {:a 2 :b 1}
 
-      (Thread/sleep 6000)
+      (Thread/sleep 1100)
 
       (send [:c 1])
       (receive) => {:a 2 :b 1 :c 1}
 
-      (Thread/sleep 11000)
+      (Thread/sleep 3000)
 
       (send [:a 1])
       (receive) => {:a 1}))
   (facts "about delay after leased hash source node"
     (test-node ::core/hash
-      (t/seconds 10)
+      (t/seconds 2)
       #(core/make-delay-node %)
 
       (send [:a 1])
@@ -116,12 +116,12 @@
       (send [:a 2])
       (receive) => {:a 1}
 
-      (Thread/sleep 3000)
+      (Thread/sleep 500)
 
       (send [:b 2])
       (receive) => {:a 1 :b 1}
 
-      (Thread/sleep 8000)
+      (Thread/sleep 1750)
 
       (send [:c 1])
       (receive) => {:b 1}
@@ -130,13 +130,13 @@
       (receive) => {:b 1}))
   (facts "about delay after leased multiset source node"
     (test-node ::core/multiset
-      (t/seconds 10)
+      (t/seconds 2)
       #(core/make-delay-node %)
 
       (send 1)
       (receive) => (ms/multiset)
 
-      (Thread/sleep 2000)
+      (Thread/sleep 500)
 
       (send 2)
       (receive) => (ms/multiset 1)
@@ -144,7 +144,7 @@
       (send 3)
       (receive) => (ms/multiset 1 2)
 
-      (Thread/sleep 9000)
+      (Thread/sleep 1800)
 
       (send 4)
       (receive) => (ms/multiset 2 3)
@@ -153,7 +153,7 @@
       (receive) => (ms/multiset 2 3 4)))
   (facts "about buffer after leased hash source node"
     (test-node ::core/hash
-      (t/seconds 10)
+      (t/seconds 2)
       #(core/make-buffer-node % 2)
 
       (send [:a 1])
@@ -165,7 +165,7 @@
       (send [:c 1])
       (receive) => {:b 1 :c 1}
 
-      (Thread/sleep 11000)
+      (Thread/sleep 3000)
 
       (send [:d 1])
       (receive) => {:d 1}
@@ -174,7 +174,7 @@
       (receive) => {:d 1 :e 1}))
   (facts "about buffer after leased multiset source node"
     (test-node ::core/multiset
-      (t/seconds 10)
+      (t/seconds 2)
       #(core/make-buffer-node % 2)
 
       (send 1)
@@ -186,7 +186,7 @@
       (send 3)
       (receive) => (ms/multiset 2 3)
 
-      (Thread/sleep 11000)
+      (Thread/sleep 3000)
 
       (send 4)
       (receive) => (ms/multiset 4)
