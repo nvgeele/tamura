@@ -190,13 +190,19 @@
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
 
-(def ^:private started? (atom false))
+(declare *coordinator*)
+
+(core/defn- started?
+  []
+  (let [c (chan 0)
+        s (do (>!! (:in *coordinator*) {:started? c})
+              (<!! c))]
+    (a/close! c)
+    s))
 
 (core/defn start
   []
-  (if @started?
-    (throw (Exception. "Already started!"))
-    (swap! started? (constantly true))))
+  (>!! (:in *coordinator*) :start))
 
 ;; TODO: do we still need heights?
 ;; TODO: phase2 of multiclock reactive programming (detect when construction is done) (or cheat and Thread/sleep)
@@ -204,20 +210,28 @@
   []
   (let [in (chan)]
     (go-loop [msg (<!! in)
+              started? false
               sources []]
       (match msg
         {:new-source source-chan}
-        (if @started?
+        (if started?
           (throw (Exception. "can not add new sources when already running"))
-          (recur (<!! in) (cons source-chan sources)))
+          (recur (<!! in) started? (cons source-chan sources)))
 
         {:destination id :value value}
-        (do (when @started?
+        (do (when started?
               (doseq [source sources]
                 (>!! source msg)))
-            (recur (<!! in) sources))
+            (recur (<!! in) started? sources))
 
-        :else (recur (<!! in) sources)))
+        {:started? reply-channel}
+        (do (>!! reply-channel started?)
+            (recur (<!! in) started? sources))
+
+        :start
+        (recur (<!! in) true sources)
+
+        :else (recur (<!! in) started? sources)))
     (Coordinator. in)))
 
 ;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
@@ -299,7 +313,7 @@
   `(go-loop [in# (<!! ~channel)]
      (match in#
        {:subscribe c#}
-       (if @started?
+       (if started?
          (throw (Exception. "can not add subscribers to nodes when started"))
          (swap! ~subscribers #(cons c# %)))
 
@@ -668,7 +682,7 @@
                 (recur (<!! input) previous buffer-list buffer))))
     (Node. sub-chan id false)))
 
-(def ^:dynamic *coordinator* (make-coordinator))
+(def ^:dynamic ^:static *coordinator* (make-coordinator))
 
 ;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
