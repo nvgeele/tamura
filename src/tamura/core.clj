@@ -190,6 +190,14 @@
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
 
+(def ^:private started? (atom false))
+
+(core/defn start
+  []
+  (if @started?
+    (throw (Exception. "Already started!"))
+    (swap! started? (constantly true))))
+
 ;; TODO: do we still need heights?
 ;; TODO: phase2 of multiclock reactive programming (detect when construction is done) (or cheat and Thread/sleep)
 (core/defn make-coordinator
@@ -198,15 +206,18 @@
     (go-loop [msg (<!! in)
               sources []]
       (match msg
-             {:new-source source-chan}
-             (recur (<!! in) (cons source-chan sources))
+        {:new-source source-chan}
+        (if @started?
+          (throw (Exception. "can not add new sources when already running"))
+          (recur (<!! in) (cons source-chan sources)))
 
-             {:destination id :value value}
-             (do (doseq [source sources]
-                   (>!! source msg))
-                 (recur (<!! in) sources))
+        {:destination id :value value}
+        (do (when @started?
+              (doseq [source sources]
+                (>!! source msg)))
+            (recur (<!! in) sources))
 
-             :else (recur (<!! in) sources)))
+        :else (recur (<!! in) sources)))
     (Coordinator. in)))
 
 ;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
@@ -283,16 +294,22 @@
   (doseq [sub @subscribers]
     (>!! sub {:changed? changed? :value value :from id})))
 
+(defmacro subscriber-loop
+  [channel subscribers]
+  `(go-loop [in# (<!! ~channel)]
+     (match in#
+       {:subscribe c#}
+       (if @started?
+         (throw (Exception. "can not add subscribers to nodes when started"))
+         (swap! ~subscribers #(cons c# %)))
+
+       :else nil)
+     (recur (<!! ~channel))))
+
 ;; TODO: for generic node construction
 (defmacro defnode
   [name inputs bindings & body]
   `(throw (Exception. "TODO")))
-
-(defmacro subscriber-loop
-  [channel subscribers]
-  `(go-loop [in# (<!! ~channel)]
-     (match in# {:subscribe c#} (swap! ~subscribers #(cons c# %)) :else nil)
-     (recur (<!! ~channel))))
 
 ;; input nodes = the actual node records
 ;; inputs = input channels
