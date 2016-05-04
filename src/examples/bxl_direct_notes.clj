@@ -103,3 +103,48 @@
 ;; zip will zip "matching" elements. If an element has no match, no tuple is produced for that element.
 
 ;; idea: sink nodes only can break abstraction of sets
+
+
+
+;; TODO: minimise node boilerplate *
+;; TODO: buffer *
+;; TODO: test een delay na een buffer... *
+;; TODO: fix the whole doseq recur stuff, too verbose, too much duplication
+;; TODO: leasing *
+;; TODO: filter node *
+;; TODO: betere primitives zodat het duidelijker is wat wat nu juist maakt
+;; TODO: meer examples
+;; TODO: waarom sets juist?
+;; TODO: static architecture
+;; TODO: make nodes testable
+;; TODO: steek datatype van een signal in de signal metadata
+;; TODO: sampleOn en throttle in functie hiervan
+
+;; TODO: STATIC GRAPH
+;; TODO: DELAY GARBAGE COLLECTION
+
+
+
+(comment (map-multiset (fn [key value]
+                         (return new-value-for-key))
+                       keyed-signal)
+
+         (map (fn [value]
+                (return new-value))
+              non-keyed-signal)
+
+         (filter (fn [key value]
+                   true)
+                 keyed-signal)
+
+         (filter (fn [value]
+                   true)
+                 non-keyed-signal)
+
+         (transform (fn [value]
+                      [key value])
+                    non-keyed-signal)
+
+         (transform (fn [key value]
+                      value)
+                    keyed-signal))

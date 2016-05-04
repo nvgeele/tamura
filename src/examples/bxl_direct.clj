@@ -58,47 +58,12 @@
 (t/defsig max-direction (t/reduce #(if (> (second %1) (second %2)) %1 %2)
                                   [nil -1]
                                   direction-count))
-(t/print-signal max-direction)
-
-;(t/print-signal (t/throttle max-direction 1000))
 ;(t/print-signal max-direction)
 
-;; TODO: minimise node boilerplate *
-;; TODO: buffer *
-;; TODO: test een delay na een buffer...
-;; TODO: fix the whole doseq recur stuff, too verbose, too much duplication
-;; TODO: leasing
-;; TODO: filter node
-;; TODO: betere primitives zodat het duidelijker is wat wat nu juist maakt
-;; TODO: meer examples
-;; TODO: waarom sets juist?
-;; TODO: static architecture
-;; TODO: make nodes testable
-;; TODO: steek datatype van een signal in de signal metadata
+(t/print-signal (t/throttle max-direction 1000))
+;(t/print-signal max-direction)
 
-(comment (map-multiset (fn [key value]
-                         (return new-value-for-key))
-                       keyed-signal)
-
-         (map (fn [value]
-                (return new-value))
-              non-keyed-signal)
-
-         (filter (fn [key value]
-                   true)
-                 keyed-signal)
-
-         (filter (fn [value]
-                   true)
-                 non-keyed-signal)
-
-         (transform (fn [value]
-                      [key value])
-                    non-keyed-signal)
-
-         (transform (fn [key value]
-                      value)
-                    keyed-signal))
+(t/start)
 
 ;;;;;;;;;;;;;;;
 
