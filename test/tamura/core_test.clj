@@ -10,18 +10,21 @@
 (def ^:dynamic *test-chan* nil)
 (def ^:dynamic *current-type* nil)
 
+(def test-fns (atom []))
+
 (defmacro test-node
   [type timeout node-init & body]
   `(let [source-node# (core/make-source-node ~type :timeout ~timeout)
          init# ~node-init]
-     (binding [*source-id* (:id source-node#)
-               *source-chan* (:in source-node#)
-               *test-chan* (core/chan)
-               *current-type* ~type]
-       (if init#
-         (core/node-subscribe (init# source-node#) *test-chan*)
-         (core/node-subscribe source-node# *test-chan*))
-       ~@body)))
+     (swap! test-fns conj (fn []
+                            (binding [*source-id* (:id source-node#)
+                                      *source-chan* (:in source-node#)
+                                      *test-chan* (core/chan)
+                                      *current-type* ~type]
+                              (if init#
+                                (core/node-subscribe (init# source-node#) *test-chan*)
+                                (core/node-subscribe source-node# *test-chan*))
+                              ~@body)))))
 
 (defmacro test-multiset-node
   [node-init & body]
@@ -49,6 +52,12 @@
     ::core/multiset (receive-multiset)
     ::core/hash (receive-hash)
     (throw (Exception. "*current-type* not bound"))))
+
+;; TODO: capture test metadata
+(defn do-tests
+  []
+  (doseq [test-fn @test-fns]
+    (test-fn)))
 
 ;; TODO: test a changed? false send too?
 
@@ -268,3 +277,5 @@
 
     (send 'b)
     (receive) => (ms/multiset ['a 1] ['b 2])))
+
+(do-tests)
