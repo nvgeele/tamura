@@ -15,15 +15,17 @@
 (defmacro test-node
   [type timeout node-init & body]
   `(let [source-node# (core/make-source-node ~type :timeout ~timeout)
-         init# ~node-init]
+         init# ~node-init
+         source-id# (:id source-node#)
+         test-chan# (core/chan)]
+     (if init#
+       (core/node-subscribe (init# source-node#) test-chan#)
+       (core/node-subscribe source-node# test-chan#))
      (swap! test-fns conj (fn []
-                            (binding [*source-id* (:id source-node#)
+                            (binding [*source-id* source-id#
                                       *source-chan* (:in source-node#)
-                                      *test-chan* (core/chan)
+                                      *test-chan* test-chan#
                                       *current-type* ~type]
-                              (if init#
-                                (core/node-subscribe (init# source-node#) *test-chan*)
-                                (core/node-subscribe source-node# *test-chan*))
                               ~@body)))))
 
 (defmacro test-multiset-node
