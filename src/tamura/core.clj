@@ -1,6 +1,6 @@
 (ns tamura.core
   (:require [clojure.core :as core]
-            [clojure.core.async :as a :refer [>!! <!! go go-loop]]
+            [clojure.core.async :as a :refer [>!! >! <!! <! go go-loop]]
             [clojure.core.match :refer [match]]
             [clojure.data.priority-map :as pm]
             [clojure.edn :as edn]
@@ -209,7 +209,7 @@
 (core/defn make-coordinator
   []
   (let [in (chan)]
-    (go-loop [msg (<!! in)
+    (go-loop [msg (<! in)
               started? false
               sources []]
       (log/debug (str "coordinator received: " msg))
@@ -217,21 +217,21 @@
         {:new-source source-chan}
         (if started?
           (throw (Exception. "can not add new sources when already running"))
-          (recur (<!! in) started? (cons source-chan sources)))
+          (recur (<! in) started? (cons source-chan sources)))
 
         {:destination id :value value}
         (do (when started?
               (doseq [source sources]
-                (>!! source msg)))
-            (recur (<!! in) started? sources))
+                (>! source msg)))
+            (recur (<! in) started? sources))
 
         {:started? reply-channel}
-        (do (>!! reply-channel started?)
-            (recur (<!! in) started? sources))
+        (do (>! reply-channel started?)
+            (recur (<! in) started? sources))
 
-        :start (recur (<!! in) true sources)
+        :start (recur (<! in) true sources)
 
-        :else (recur (<!! in) started? sources)))
+        :else (recur (<! in) started? sources)))
     (Coordinator. in)))
 
 ;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
@@ -245,14 +245,14 @@
   [type & {:keys [timeout] :or {timeout false}}]
   (let [in (chan)
         id (new-id!)]
-    (go-loop [msg (<!! in)
+    (go-loop [msg (<! in)
               subs []
               pm (pm/priority-map)
               value (if (= type ::multiset) (make-multiset) (make-hash))]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
         {:subscribe subscriber}
-        (recur (<!! in) (cons subscriber subs) pm value)
+        (recur (<! in) (cons subscriber subs) pm value)
 
         {:destination id :value new-value}
         (let [now (t/now)
@@ -276,20 +276,20 @@
                       [coll pm])))
                 [new-coll nil])]
           (doseq [sub subs]
-            (>!! sub {:changed? true
-                      :value    new-coll
-                      :origin   id}))
-          (recur (<!! in) subs new-pm new-coll))
+            (>! sub {:changed? true
+                     :value    new-coll
+                     :origin   id}))
+          (recur (<! in) subs new-pm new-coll))
 
         {:destination _}
         (do (doseq [sub subs]
-              (>!! sub {:changed? false
-                        :value    value
-                        :origin   id}))
-            (recur (<!! in) subs pm value))
+              (>! sub {:changed? false
+                       :value    value
+                       :origin   id}))
+            (recur (<! in) subs pm value))
 
         ;; TODO: error?
-        :else (recur (<!! in) subs pm value)))
+        :else (recur (<! in) subs pm value)))
     (Source. in in id true)))
 
 (core/defn subscribe-input
@@ -306,11 +306,11 @@
 (core/defn send-subscribers
   [subscribers changed? value id]
   (doseq [sub @subscribers]
-    (>!! sub {:changed? changed? :value value :from id})))
+    (>! sub {:changed? changed? :value value :from id})))
 
 (defmacro subscriber-loop
   [id channel subscribers]
-  `(go-loop [in# (<!! ~channel)]
+  `(go-loop [in# (<! ~channel)]
      (match in#
        {:subscribe c#}
        (do (log/debug (str "node " ~id " has received subscriber message"))
@@ -319,7 +319,7 @@
              (swap! ~subscribers #(cons c# %))))
 
        :else nil)
-     (recur (<!! ~channel))))
+     (recur (<! ~channel))))
 
 ;; TODO: for generic node construction
 (defmacro defnode
@@ -343,7 +343,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
+    (go-loop [msg (<! input)
               value (make-hash)]
       (log/debug (str "map-to-hash-node " id " has received: " msg))
       (if (:changed? msg)
@@ -356,11 +356,11 @@
                                           {}
                                           values))]
           (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-hash :from id}))
-          (recur (<!! input) new-hash))
+            (>! sub {:changed? true :value new-hash :from id}))
+          (recur (<! input) new-hash))
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
+              (>! sub {:changed? false :value value :from id}))
+            (recur (<! input) value))))
     (Node. sub-chan id false)))
 
 (core/defn make-map-multiset-node
@@ -370,7 +370,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
+    (go-loop [msg (<! input)
               value (make-multiset)]
       (log/debug (str "map-to-multiset-node " id " has received: " msg))
       (if (:changed? msg)
@@ -379,24 +379,30 @@
                        (:multiset (:value msg)))
               new-set (make-multiset (apply ms/multiset (map f values)))]
           (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-set :from id}))
-          (recur (<!! input) new-set))
+            (>! sub {:changed? true :value new-set :from id}))
+          (recur (<! input) new-set))
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
+              (>! sub {:changed? false :value value :from id}))
+            (recur (<! input) value))))
     (Node. sub-chan id false)))
 
 (core/defn make-do-apply-node
   [input-nodes action]
   (let [id (new-id!)
         inputs (subscribe-inputs input-nodes)]
-    (go-loop [msgs (map <!! inputs)]
+    (go-loop [msgs
+              (map <!! inputs)
+              #_(<! (first inputs))
+              #_(for [input inputs] (<! input))
+              ]
       (log/debug (str "do-apply-node " id " has received: " (seq msgs)))
       (when (ormap :changed? msgs)
         (let [values (map :value msgs)
               colls (map #(if (hash? %) (:hash %) (:multiset %)) values)]
           (apply action colls)))
-      (recur (map <!! inputs)))
+      (recur (map <!! inputs)
+             #_(<! (first inputs))
+             #_(for [input inputs] (<! input))))
     (Sink. id false)))
 
 ;; TODO: say false when no new element is added to the filtered set?
@@ -408,7 +414,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
+    (go-loop [msg (<! input)
               value nil]
       (log/debug (str "filter-node " id " has received: " msg))
       (if (:changed? msg)
@@ -420,11 +426,11 @@
                     (make-hash (into {} filtered))
                     (make-multiset (apply ms/multiset filtered)))]
           (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new :from id}))
-          (recur (<!! input) new))
+            (>! sub {:changed? true :value new :from id}))
+          (recur (<! input) new))
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
+              (>! sub {:changed? false :value value :from id}))
+            (recur (<! input) value))))
     (Node. sub-chan id false)))
 
 ;; TODO: put in docstring that it emits empty hash or set
@@ -456,7 +462,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
+    (go-loop [msg (<! input)
               previous (set nil)
               delayed nil]
       (log/debug (str "delay-node " id " has received: " msg))
@@ -466,8 +472,8 @@
                   removed (multiset-minus delayed (:value msg))
                   delayed (if removed (multiset-minus delayed removed) delayed)]
               (doseq [sub @subscribers]
-                (>!! sub {:changed? true :value delayed :from id}))
-              (recur (<!! input) nil (multiset-union delayed added)))
+                (>! sub {:changed? true :value delayed :from id}))
+              (recur (<! input) nil (multiset-union delayed added)))
 
             (:changed? msg)
             (let [previous-keys (set (hash-keys previous))
@@ -481,13 +487,13 @@
                             (or delayed (make-hash)))
                   delayed (reduce #(hash-remove %1 %2) delayed removed-keys)]
               (doseq [sub @subscribers]
-                (>!! sub {:changed? true :value delayed :from id}))
-              (recur (<!! input) (:value msg) delayed))
+                (>! sub {:changed? true :value delayed :from id}))
+              (recur (<! input) (:value msg) delayed))
 
             :else
             (do (doseq [sub @subscribers]
-                  (>!! sub {:changed? false :value delayed :from id}))
-                (recur (<!! input) previous delayed))))
+                  (>! sub {:changed? false :value delayed :from id}))
+                (recur (<! input) previous delayed))))
     (Node. sub-chan id false)))
 
 ;; TODO: assert l and r are hashes
@@ -498,7 +504,7 @@
         subscribers (atom [])
         inputs (subscribe-inputs [left-node right-node])]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [[l r] (map <!! inputs)
+    (go-loop [[l r] (map <! inputs)
               zipped (make-multiset)]
       (log/debug (str "zip-node " id " has received: " [l r]))
       (if (or (:changed? l) (:changed? r))
@@ -514,11 +520,11 @@
                            in-both)
               zipped (make-hash hash)]
           (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value zipped :from id}))
-          (recur (map <!! inputs) zipped))
+            (>! sub {:changed? true :value zipped :from id}))
+          (recur (map <! inputs) zipped))
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value zipped :from id}))
-            (recur (map <!! inputs) zipped))))
+              (>! sub {:changed? false :value zipped :from id}))
+            (recur (map <! inputs) zipped))))
     (Node. sub-chan id false)))
 
 ;; TODO: assert input is a multiset
@@ -530,18 +536,18 @@
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
+    (go-loop [msg (<! input)
               value nil]
       (log/debug (str "multiplicities-node " id " has received: " msg))
       (if (:changed? msg)
         (let [multiplicities (multiset-multiplicities (:value msg))
               new-set (make-multiset (apply ms/multiset (seq multiplicities)))]
           (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-set :from id}))
-          (recur (<!! input) new-set))
+            (>! sub {:changed? true :value new-set :from id}))
+          (recur (<! input) new-set))
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
+              (>! sub {:changed? false :value value :from id}))
+            (recur (<! input) value))))
     (Node. sub-chan id false)))
 
 (core/defn make-reduce-node
@@ -551,7 +557,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
+    (go-loop [msg (<! input)
               value (make-multiset)]
       (log/debug (str "reduce-node " id " has received: " msg))
       (if (:changed? msg)
@@ -561,11 +567,11 @@
                         (if (>= (count values) 2) (reduce f values) nil))
               new-set (make-multiset (ms/multiset reduced))]
           (doseq [sub @subscribers]
-            (>!! sub {:changed? true :value new-set :from id}))
-          (recur (<!! input) new-set))
+            (>! sub {:changed? true :value new-set :from id}))
+          (recur (<! input) new-set))
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value value :from id}))
-            (recur (<!! input) value))))
+              (>! sub {:changed? false :value value :from id}))
+            (recur (<! input) value))))
     (Node. sub-chan id false)))
 
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
@@ -582,17 +588,17 @@
         input (subscribe-input input-node)
         trigger (subscribe-input trigger-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
-              trig (<!! trigger)
+    (go-loop [msg (<! input)
+              trig (<! trigger)
               seen-value false]
       (log/debug (str "throttle-node " id " has received: " msg))
       (if (:changed? trig)
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? (or seen-value (:changed? msg)) :value (:value msg) :from id}))
-            (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))
+              (>! sub {:changed? (or seen-value (:changed? msg)) :value (:value msg) :from id}))
+            (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))
         (do (doseq [sub @subscribers]
-              (>!! sub {:changed? false :value (:value msg) :from id}))
-            (recur (<!! input) (<!! trigger) (or seen-value (:changed? msg))))))
+              (>! sub {:changed? false :value (:value msg) :from id}))
+            (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
     (Node. sub-chan id false)))
 
 (comment
@@ -620,7 +626,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<!! input)
+    (go-loop [msg (<! input)
               previous nil
               buffer-list (LinkedList.)
               buffer nil]
@@ -642,9 +648,9 @@
                 (do (.addFirst buffer-list new-element)
                     (let [buffer (make-multiset (apply ms/multiset buffer-list))]
                       (send-subscribers subscribers true buffer id)
-                      (recur (<!! input) (:multiset (:value msg)) buffer-list buffer)))
+                      (recur (<! input) (:multiset (:value msg)) buffer-list buffer)))
                 (do (send-subscribers subscribers true buffer id)
-                    (recur (<!! input) (:multiset (make-multiset)) buffer-list buffer))))
+                    (recur (<! input) (:multiset (make-multiset)) buffer-list buffer))))
 
             (:changed? msg)
             (let [new-set (hash->set (:value msg))
@@ -667,7 +673,7 @@
                   (.remove buffer-list new-key)
                   (.addFirst buffer-list new-key)
                   (send-subscribers subscribers true buffer id)
-                  (recur (<!! input) (:value msg) buffer-list buffer))
+                  (recur (<! input) (:value msg) buffer-list buffer))
                 (let [buffer (-> (or buffer (make-hash))
                                  (#(if (= (count buffer-list) size)
                                     (hash-remove % (.removeLast buffer-list))
@@ -675,12 +681,12 @@
                                  (hash-insert new-key (second new-element)))]
                   (.addFirst buffer-list new-key)
                   (send-subscribers subscribers true buffer id)
-                  (recur (<!! input) (:value msg) buffer-list buffer))))
+                  (recur (<! input) (:value msg) buffer-list buffer))))
 
             :else
             (do (doseq [sub @subscribers]
-                  (>!! sub {:changed? false :value buffer :from id}))
-                (recur (<!! input) previous buffer-list buffer))))
+                  (>! sub {:changed? false :value buffer :from id}))
+                (recur (<! input) previous buffer-list buffer))))
     (Node. sub-chan id false)))
 
 (def ^:dynamic ^:static *coordinator* (make-coordinator))
