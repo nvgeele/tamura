@@ -212,6 +212,7 @@
     (go-loop [msg (<!! in)
               started? false
               sources []]
+      (log/debug (str "coordinator received: " msg))
       (match msg
         {:new-source source-chan}
         (if started?
@@ -228,8 +229,7 @@
         (do (>!! reply-channel started?)
             (recur (<!! in) started? sources))
 
-        :start
-        (recur (<!! in) true sources)
+        :start (recur (<!! in) true sources)
 
         :else (recur (<!! in) started? sources)))
     (Coordinator. in)))
@@ -309,13 +309,14 @@
     (>!! sub {:changed? changed? :value value :from id})))
 
 (defmacro subscriber-loop
-  [channel subscribers]
+  [id channel subscribers]
   `(go-loop [in# (<!! ~channel)]
      (match in#
        {:subscribe c#}
-       (if started?
-         (throw (Exception. "can not add subscribers to nodes when started"))
-         (swap! ~subscribers #(cons c# %)))
+       (do (log/debug (str "node " ~id " has received subscriber message"))
+           (if (started?)
+             (throw (Exception. "can not add subscribers to nodes when started"))
+             (swap! ~subscribers #(cons c# %))))
 
        :else nil)
      (recur (<!! ~channel))))
@@ -341,7 +342,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               value (make-hash)]
       (log/debug (str "map-to-hash-node " id " has received: " msg))
@@ -368,7 +369,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               value (make-multiset)]
       (log/debug (str "map-to-multiset-node " id " has received: " msg))
@@ -406,7 +407,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               value nil]
       (log/debug (str "filter-node " id " has received: " msg))
@@ -454,7 +455,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               previous (set nil)
               delayed nil]
@@ -496,7 +497,7 @@
         sub-chan (chan)
         subscribers (atom [])
         inputs (subscribe-inputs [left-node right-node])]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [[l r] (map <!! inputs)
               zipped (make-multiset)]
       (log/debug (str "zip-node " id " has received: " [l r]))
@@ -528,7 +529,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               value nil]
       (log/debug (str "multiplicities-node " id " has received: " msg))
@@ -549,7 +550,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               value (make-multiset)]
       (log/debug (str "reduce-node " id " has received: " msg))
@@ -580,7 +581,7 @@
         subscribers (atom [])
         input (subscribe-input input-node)
         trigger (subscribe-input trigger-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               trig (<!! trigger)
               seen-value false]
@@ -618,7 +619,7 @@
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (subscriber-loop sub-chan subscribers)
+    (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<!! input)
               previous nil
               buffer-list (LinkedList.)
@@ -684,6 +685,14 @@
 
 (def ^:dynamic ^:static *coordinator* (make-coordinator))
 
+(core/defn- make-signal
+  [node]
+  ;; NOTE: this is a little hack to ensure correct ordering of start/started? messages
+  ;; We make sure that every node sends at least one message to the coordinator, so the coordinator is not started
+  ;; before graph construction is finished.
+  (>!! (:in *coordinator*) :else)
+  (v/make-signal node))
+
 ;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
 ;; TODO: something something polling time
@@ -703,7 +712,7 @@
                     parsed)]
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur values)))
-    (v/make-signal node)))
+    (make-signal node)))
 
 ;; TODO: maybe rename to redis-input
 (def redis make-redis)
@@ -717,7 +726,7 @@
   (if (v/signal? arg)
     (let [source-node (v/value arg)
           node (make-map-hash-node source-node f)]
-      (v/make-signal node))
+      (make-signal node))
     (throw (Exception. "map-to-hash requires a signal as second argument"))))
 
 ;; TODO: test
@@ -726,7 +735,7 @@
   (if (v/signal? arg)
     (let [source-node (v/value arg)
           node (make-map-multiset-node source-node f)]
-      (v/make-signal node))
+      (make-signal node))
     (throw (Exception. "map-to-multiset requires a signal as second argument"))))
 
 (core/defn lift
@@ -740,7 +749,7 @@
 (core/defn do-apply
   [f arg & args]
   (if (andmap v/signal? (cons arg args))
-    (v/make-signal (make-do-apply-node (map v/value (cons arg args)) f))
+    (make-signal (make-do-apply-node (map v/value (cons arg args)) f))
     (throw (Exception. "do-apply needs to be applied to signals"))))
 
 (core/defn filter
@@ -748,7 +757,7 @@
   (if (v/signal? arg)
     (let [source-node (v/value arg)
           node (make-filter-node source-node f)]
-      (v/make-signal node))
+      (make-signal node))
     (core/filter f arg)))
 
 ;; TODO: new filter
@@ -762,19 +771,19 @@
   (if (v/signal? arg)
     (let [source-node (v/value arg)
           node (make-delay-node source-node)]
-      (v/make-signal node))
+      (make-signal node))
     (throw (Exception. "argument to delay should be a signal"))))
 
 (core/defn zip
   [left right]
   (if (and (v/signal? left) (v/signal? right))
-    (v/make-signal (make-zip-node (v/value left) (v/value right)))
+    (make-signal (make-zip-node (v/value left) (v/value right)))
     (throw (Exception. "arguments to zip should be signals"))))
 
 (core/defn multiplicities
   [arg]
   (if (v/signal? arg)
-    (v/make-signal (make-multiplicities-node (v/value arg)))
+    (make-signal (make-multiplicities-node (v/value arg)))
     (throw (Exception. "argument to delay should be a signal"))))
 
 (core/defn reduce
@@ -782,13 +791,13 @@
    (if (v/signal? arg)
      (-> (v/value arg)
          (make-reduce-node f)
-         (v/make-signal))
+         (make-signal))
      (core/reduce f arg)))
   ([f val coll]
    (if (v/signal? coll)
      (-> (v/value coll)
          (make-reduce-node f val)
-         (v/make-signal))
+         (make-signal))
      (core/reduce f val coll))))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
@@ -805,7 +814,7 @@
         (Thread/sleep ms)
         (>!! (:in *coordinator*) {:destination (:id source-node) :value nil})
         (recur))
-      (v/make-signal throttle-node))
+      (make-signal throttle-node))
     (throw (Exception. "first argument of throttle must be signal"))))
 
 ;; TODO: corner case size 0
@@ -814,7 +823,7 @@
   (if (v/signal? sig)
     (let [source-node (v/value sig)
           node (make-buffer-node source-node size)]
-      (v/make-signal node))
+      (make-signal node))
     (throw (Exception. "first argument to delay should be a signal"))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
