@@ -303,10 +303,10 @@
   (map subscribe-input inputs))
 
 ;; TODO: use this in all nodes
-(core/defn send-subscribers
+(defmacro send-subscribers
   [subscribers changed? value id]
-  (doseq [sub @subscribers]
-    (>! sub {:changed? changed? :value value :from id})))
+  `(doseq [sub# @~subscribers]
+     (>! sub# {:changed? ~changed? :value ~value :from ~id})))
 
 (defmacro subscriber-loop
   [id channel subscribers]
