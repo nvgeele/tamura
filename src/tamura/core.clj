@@ -502,9 +502,11 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        inputs (subscribe-inputs [left-node right-node])]
+        left-in (subscribe-input left-node)
+        right-in (subscribe-input right-node)]
     (subscriber-loop id sub-chan subscribers)
-    (go-loop [[l r] (map <! inputs)
+    (go-loop [l (<! left-in)
+              r (<! right-in)
               zipped (make-multiset)]
       (log/debug (str "zip-node " id " has received: " [l r]))
       (if (or (:changed? l) (:changed? r))
@@ -521,10 +523,10 @@
               zipped (make-hash hash)]
           (doseq [sub @subscribers]
             (>! sub {:changed? true :value zipped :from id}))
-          (recur (map <! inputs) zipped))
+          (recur (<! left-in) (<! right-in) zipped))
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value zipped :from id}))
-            (recur (map <! inputs) zipped))))
+            (recur (<! left-in) (<! right-in) zipped))))
     (Node. sub-chan id false)))
 
 ;; TODO: assert input is a multiset

@@ -58,6 +58,7 @@
 ;; TODO: capture test metadata
 (defn do-tests
   []
+  (core/start)
   (doseq [test-fn @test-fns]
     (test-fn)))
 

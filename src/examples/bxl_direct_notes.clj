@@ -104,6 +104,28 @@
 
 ;; idea: sink nodes only can break abstraction of sets
 
+;; DELAY
+(comment
+  ;; How it should be (for keyed sets)
+  #{{:id 1 :v 1}}
+  #{}
+
+  #{{:id 1 :v 1} {:id 2 :v 1}}
+  #{}
+
+  #{{:id 1 :v 2} {:id 2 :v 1}}
+  #{{:id 1 :v 1}}
+
+  ;; How it should be (for none keyed sets)
+  #{a}
+  #{}
+
+  #{a b}
+  #{a}
+
+  #{a b c}
+  #{a b})
+
 
 
 ;; TODO: minimise node boilerplate *

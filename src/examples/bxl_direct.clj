@@ -3,28 +3,6 @@
 
 ;;;;;;;;;;;;;;;
 
-;; DELAY
-(comment
-  ;; How it should be (for keyed sets)
-  #{{:id 1 :v 1}}
-  #{}
-
-  #{{:id 1 :v 1} {:id 2 :v 1}}
-  #{}
-
-  #{{:id 1 :v 2} {:id 2 :v 1}}
-  #{{:id 1 :v 1}}
-
-  ;; How it should be (for none keyed sets)
-  #{a}
-  #{}
-
-  #{a b}
-  #{a}
-
-  #{a b c}
-  #{a b})
-
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
   (let [y (* (Math/sin (- cur_lon pre_lon)) (Math/cos cur_lat))
@@ -63,10 +41,9 @@
 (t/print-signal (t/throttle max-direction 1000))
 ;(t/print-signal max-direction)
 
-(t/start)
-
 ;;;;;;;;;;;;;;;
 
 (defn -main
   [& args]
-  (println "Blank!"))
+  (t/start)
+  (println "Ready"))
