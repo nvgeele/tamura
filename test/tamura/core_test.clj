@@ -58,7 +58,8 @@
 ;; TODO: capture test metadata
 (defn do-tests
   []
-  (core/start)
+  ;; NOTE: we currently bypass the coordinator, so we do not need to start
+  ;; (core/start)
   (doseq [test-fn @test-fns]
     (test-fn)))
 

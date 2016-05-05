@@ -190,7 +190,7 @@
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
 
-(declare *coordinator*)
+(declare ^:dynamic ^:private *coordinator*)
 
 (core/defn- started?
   []
@@ -691,7 +691,7 @@
                 (recur (<! input) previous buffer-list buffer))))
     (Node. sub-chan id false)))
 
-(def ^:dynamic ^:static *coordinator* (make-coordinator))
+(def ^:dynamic ^:private *coordinator* (make-coordinator))
 
 (core/defn- make-signal
   [node]
