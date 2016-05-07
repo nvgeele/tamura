@@ -341,15 +341,14 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        selector (if (= (:return-type input-node) ::hash) :hash :multiset)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-hash)]
       (log/debug (str "map-to-hash-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (if (hash? (:value msg))
-                       (:hash (:value msg))
-                       (:multiset (:value msg)))
+        (let [values (selector (:value msg))
               new-hash (make-hash (reduce (fn [h v]
                                             (let [[k v] (f v)]
                                               (assoc h k v)))
@@ -363,20 +362,20 @@
             (recur (<! input) value))))
     (Node. id ::map-to-hash ::hash sub-chan)))
 
+;; TODO: tests
 (core/defn make-map-multiset-node
   [input-node f]
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        selector (if (= (:return-type input-node) ::hash) :hash :multiset)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-multiset)]
       (log/debug (str "map-to-multiset-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (if (hash? (:value msg))
-                       (:hash (:value msg))
-                       (:multiset (:value msg)))
+        (let [values (selector (:value msg))
               new-set (make-multiset (apply ms/multiset (map f values)))]
           (doseq [sub @subscribers]
             (>! sub {:changed? true :value new-set :from id}))
@@ -386,10 +385,12 @@
             (recur (<! input) value))))
     (Node. id ::map-to-multiset ::multiset sub-chan)))
 
+;; TODO: tests
 (core/defn make-do-apply-node
   [input-nodes action]
   (let [id (new-id!)
-        inputs (subscribe-inputs input-nodes)]
+        inputs (subscribe-inputs input-nodes)
+        selectors (map #(if (= (:return-type %) ::hash) :hash :multiset) input-nodes)]
     (go-loop [msgs
               (map <!! inputs)
               #_(<! (first inputs))
@@ -397,8 +398,7 @@
               ]
       (log/debug (str "do-apply-node " id " has received: " (seq msgs)))
       (when (ormap :changed? msgs)
-        (let [values (map :value msgs)
-              colls (map #(if (hash? %) (:hash %) (:multiset %)) values)]
+        (let [colls (map #(%1 (:value %2)) selectors msgs)]
           (apply action colls)))
       (recur (map <!! inputs)
              #_(<! (first inputs))
@@ -406,23 +406,24 @@
     (Sink. id false)))
 
 ;; TODO: say false when no new element is added to the filtered set?
-;; TODO: re-test
+;; TODO: tests
 (core/defn make-filter-node
   [input-node predicate]
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        input-type (:return-type input-node)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value nil]
       (log/debug (str "filter-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (if (hash? (:value msg))
+        (let [values (if (= input-type ::hash)
                        (:hash (:value msg))
                        (:multiset (:value msg)))
               filtered (filter predicate values)
-              new (if (hash? (:value msg))
+              new (if (= input-type ::hash)
                     (make-hash (into {} filtered))
                     (make-multiset (apply ms/multiset filtered)))]
           (doseq [sub @subscribers]
@@ -460,22 +461,14 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        hash-input? (= (:return-type input-node) ::hash)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               previous (set nil)
               delayed nil]
       (log/debug (str "delay-node " id " has received: " msg))
-      (cond (and (:changed? msg) (multiset? (:value msg)))
-            (let [delayed (or delayed (make-multiset))
-                  added (multiset-minus (:value msg) delayed)
-                  removed (multiset-minus delayed (:value msg))
-                  delayed (if removed (multiset-minus delayed removed) delayed)]
-              (doseq [sub @subscribers]
-                (>! sub {:changed? true :value delayed :from id}))
-              (recur (<! input) nil (multiset-union delayed added)))
-
-            (:changed? msg)
+      (cond (and (:changed? msg) hash-input?)
             (let [previous-keys (set (hash-keys previous))
                   new-keys (set (hash-keys (:value msg)))
                   removed-keys (cs/difference previous-keys new-keys)
@@ -490,13 +483,21 @@
                 (>! sub {:changed? true :value delayed :from id}))
               (recur (<! input) (:value msg) delayed))
 
+            (:changed? msg)
+            (let [delayed (or delayed (make-multiset))
+                  added (multiset-minus (:value msg) delayed)
+                  removed (multiset-minus delayed (:value msg))
+                  delayed (if removed (multiset-minus delayed removed) delayed)]
+              (doseq [sub @subscribers]
+                (>! sub {:changed? true :value delayed :from id}))
+              (recur (<! input) nil (multiset-union delayed added)))
+
             :else
             (do (doseq [sub @subscribers]
                   (>! sub {:changed? false :value delayed :from id}))
                 (recur (<! input) previous delayed))))
     (Node. id ::delay (:return-type input-node) sub-chan)))
 
-;; TODO: assert l and r are hashes
 (core/defn make-zip-node
   [left-node right-node]
   (let [id (new-id!)
@@ -504,6 +505,9 @@
         subscribers (atom [])
         left-in (subscribe-input left-node)
         right-in (subscribe-input right-node)]
+    (when-not (and (= (:return-type left-node) ::hash)
+                   (= (:return-type right-node) ::hash))
+      (throw (Exception. "inputs to zip must have hashes as return types")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [l (<! left-in)
               r (<! right-in)
@@ -529,14 +533,16 @@
             (recur (<! left-in) (<! right-in) zipped))))
     (Node. id ::zip ::hash sub-chan)))
 
-;; TODO: assert input is a multiset
 ;; TODO: output as a hash?
+;; TODO: test
 (core/defn make-multiplicities-node
   [input-node]
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
+    (when-not (= (:return-type input-node) ::multiset)
+      (throw (Exception. "input to multiplicities must have multiset as return type")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value nil]
@@ -552,6 +558,7 @@
             (recur (<! input) value))))
     (Node. id ::multiplicities ::multiset sub-chan)))
 
+;; TODO: test
 (core/defn make-reduce-node
   [input-node f & initial]
   (let [id (new-id!)
@@ -626,35 +633,15 @@
   (let [id (new-id!)
         sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        hash? (= (:return-type input-node) ::hash)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               previous nil
               buffer-list (LinkedList.)
               buffer nil]
       (log/debug (str "buffer-node " id " has received: " msg))
-      (cond (and (:changed? msg) (multiset? (:value msg)))
-            (let [new-element (if previous
-                                (first (ms/minus (:multiset (:value msg)) previous))
-                                (first (:multiset (:value msg))))
-                  removed (if previous
-                            (ms/minus previous (:multiset (:value msg)))
-                            (ms/multiset))]
-              (when-not (empty? removed)
-                (doseq [el removed]
-                  (.remove buffer-list el)))
-              (when (= (count buffer-list) size)
-                (.removeLast buffer-list))
-              ;; TODO: more efficient, thus without the apply thing
-              (if new-element
-                (do (.addFirst buffer-list new-element)
-                    (let [buffer (make-multiset (apply ms/multiset buffer-list))]
-                      (send-subscribers subscribers true buffer id)
-                      (recur (<! input) (:multiset (:value msg)) buffer-list buffer)))
-                (do (send-subscribers subscribers true buffer id)
-                    (recur (<! input) (:multiset (make-multiset)) buffer-list buffer))))
-
-            (:changed? msg)
+      (cond (and (:changed? msg) hash?)
             (let [new-set (hash->set (:value msg))
                   previous-set (hash->set previous)
                   new-element (first (cs/difference new-set previous-set))
@@ -684,6 +671,27 @@
                   (.addFirst buffer-list new-key)
                   (send-subscribers subscribers true buffer id)
                   (recur (<! input) (:value msg) buffer-list buffer))))
+
+            (:changed? msg)
+            (let [new-element (if previous
+                                (first (ms/minus (:multiset (:value msg)) previous))
+                                (first (:multiset (:value msg))))
+                  removed (if previous
+                            (ms/minus previous (:multiset (:value msg)))
+                            (ms/multiset))]
+              (when-not (empty? removed)
+                (doseq [el removed]
+                  (.remove buffer-list el)))
+              (when (= (count buffer-list) size)
+                (.removeLast buffer-list))
+              ;; TODO: more efficient, thus without the apply thing
+              (if new-element
+                (do (.addFirst buffer-list new-element)
+                    (let [buffer (make-multiset (apply ms/multiset buffer-list))]
+                      (send-subscribers subscribers true buffer id)
+                      (recur (<! input) (:multiset (:value msg)) buffer-list buffer)))
+                (do (send-subscribers subscribers true buffer id)
+                    (recur (<! input) (:multiset (make-multiset)) buffer-list buffer))))
 
             :else
             (do (doseq [sub @subscribers]
