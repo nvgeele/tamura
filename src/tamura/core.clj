@@ -173,9 +173,9 @@
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
 ;; TODO: let coordinator keep list of producers, so we can have something like (coordinator-start) to kick-start errting
 (defrecord Coordinator [in])
-(defrecord Node [sub-chan id source?])
-(defrecord Source [in sub-chan id source?])                 ;; isa Node
-(defrecord Sink [id source?])                               ;; isa Node
+(defrecord Node [id node-type return-type sub-chan])
+(defrecord Source [id node-type return-type sub-chan in]) ;; isa Node
+(defrecord Sink [id node-type])                           ;; isa Node
 
 (def buffer-size 32)
 (defmacro chan
@@ -242,13 +242,13 @@
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
 (core/defn make-source-node
-  [type & {:keys [timeout] :or {timeout false}}]
+  [node-type return-type & {:keys [timeout] :or {timeout false}}]
   (let [in (chan)
         id (new-id!)]
     (go-loop [msg (<! in)
               subs []
               pm (pm/priority-map)
-              value (if (= type ::multiset) (make-multiset) (make-hash))]
+              value (if (= return-type ::multiset) (make-multiset) (make-hash))]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
         {:subscribe subscriber}
@@ -257,7 +257,7 @@
         {:destination id :value new-value}
         (let [now (t/now)
               cutoff (when timeout (t/minus now timeout))
-              new-coll (if (= type ::multiset)
+              new-coll (if (= return-type ::multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))
               new-pm (when timeout
@@ -268,7 +268,7 @@
                        coll new-coll]
                   (let [[v t] (peek pm)]
                     (if (t/before? t cutoff)
-                      (let [coll (if (= type ::multiset)
+                      (let [coll (if (= return-type ::multiset)
                                    (multiset-remove coll v)
                                    (hash-remove coll v))
                             pm (pop pm)]
@@ -290,7 +290,7 @@
 
         ;; TODO: error?
         :else (recur (<! in) subs pm value)))
-    (Source. in in id true)))
+    (Source. id node-type return-type in in)))
 
 (core/defn subscribe-input
   [input]
@@ -361,7 +361,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. sub-chan id false)))
+    (Node. id ::map-to-hash ::hash sub-chan)))
 
 (core/defn make-map-multiset-node
   [input-node f]
@@ -384,7 +384,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. sub-chan id false)))
+    (Node. id ::map-to-multiset ::multiset sub-chan)))
 
 (core/defn make-do-apply-node
   [input-nodes action]
@@ -431,7 +431,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. sub-chan id false)))
+    (Node. id ::filter (:return-type input-node) sub-chan)))
 
 ;; TODO: put in docstring that it emits empty hash or set
 ;; TODO: make sure it still works with leasing
@@ -494,7 +494,7 @@
             (do (doseq [sub @subscribers]
                   (>! sub {:changed? false :value delayed :from id}))
                 (recur (<! input) previous delayed))))
-    (Node. sub-chan id false)))
+    (Node. id ::delay (:return-type input-node) sub-chan)))
 
 ;; TODO: assert l and r are hashes
 (core/defn make-zip-node
@@ -527,7 +527,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value zipped :from id}))
             (recur (<! left-in) (<! right-in) zipped))))
-    (Node. sub-chan id false)))
+    (Node. id ::zip ::hash sub-chan)))
 
 ;; TODO: assert input is a multiset
 ;; TODO: output as a hash?
@@ -550,7 +550,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. sub-chan id false)))
+    (Node. id ::multiplicities ::multiset sub-chan)))
 
 (core/defn make-reduce-node
   [input-node f & initial]
@@ -574,7 +574,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. sub-chan id false)))
+    (Node. id ::reduce ::multiset sub-chan)))
 
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
 ;; The reason for this is that if we would not do this, the buffer for the trigger channel would fill up,
@@ -601,7 +601,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value (:value msg) :from id}))
             (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
-    (Node. sub-chan id false)))
+    (Node. id ::throttle (:return-type input-node) sub-chan)))
 
 (comment
   "Semantics buffer of size 2, multiset, after leasing/buffer"
@@ -689,7 +689,7 @@
             (do (doseq [sub @subscribers]
                   (>! sub {:changed? false :value buffer :from id}))
                 (recur (<! input) previous buffer-list buffer))))
-    (Node. sub-chan id false)))
+    (Node. id ::buffer (:return-type input-node) sub-chan)))
 
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
@@ -707,7 +707,7 @@
 ;; TODO: error if key not present
 (core/defn make-redis
   [host queue & {:keys [key] :or {key false}}]
-  (let [node (make-source-node (if key ::hash ::multiset))
+  (let [node (make-source-node ::redis (if key ::hash ::multiset))
         id (:id node)
         pool (JedisPool. host)
         conn (.getResource pool)]
@@ -815,7 +815,7 @@
 (core/defn throttle
   [signal ms]
   (if (v/signal? signal)
-    (let [source-node (make-source-node ::multiset)
+    (let [source-node (make-source-node ::throttle-trigger ::multiset)
           throttle-node (make-throttle-node (v/value signal) source-node)]
       (>!! (:in *coordinator*) {:new-source (:in source-node)})
       (threadloop []
