@@ -14,7 +14,7 @@
 
 (defmacro test-node
   [type timeout node-init & body]
-  `(let [source-node# (core/make-source-node ::test-source ~type :timeout ~timeout)
+  `(let [source-node# (core/make-source-node ~type :timeout ~timeout)
          init# ~node-init
          source-id# (:id source-node#)
          test-chan# (core/chan)]

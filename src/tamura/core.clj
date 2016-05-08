@@ -190,6 +190,39 @@
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
 
+;;;;;;;;
+
+(def nodes (atom {}))
+(def graph (atom {}))
+(def node-constructors (atom {}))
+
+(comment
+  {:id Integer
+   :inputs [Integer]
+   :node (or nil Node)
+   :args []})
+
+(core/defn register-node!
+  [node]
+  ;; TODO: update signal graph
+  (swap! nodes assoc (:id node) node))
+
+(core/defn register-source!
+  [node]
+  ;; TODO: you know
+  (register-node! node))
+
+(core/defn build-nodes! []
+  (comment (let [node-ids (keys @nodes)]
+             (loop [nodes-done (set)]
+               ))))
+
+(core/defn register-constructor!
+  [node-type constructor]
+  (swap! node-constructors assoc node-type constructor))
+
+;;;;;;;;
+
 (declare ^:dynamic ^:private *coordinator*)
 
 (core/defn- started?
@@ -236,13 +269,48 @@
 
 ;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
 
+(core/defn subscribe-input
+  [input]
+  (let [c (chan)]
+    (node-subscribe input c)
+    c))
+
+(core/defn subscribe-inputs
+  [inputs]
+  (map subscribe-input inputs))
+
+;; TODO: use this in all nodes
+(defmacro send-subscribers
+  [subscribers changed? value id]
+  `(doseq [sub# @~subscribers]
+     (>! sub# {:changed? ~changed? :value ~value :from ~id})))
+
+(defmacro subscriber-loop
+  [id channel subscribers]
+  `(go-loop [in# (<! ~channel)]
+     (match in#
+       {:subscribe c#}
+       (do (log/debug (str "node " ~id " has received subscriber message"))
+           (if (started?)
+             (throw (Exception. "can not add subscribers to nodes when started"))
+             (swap! ~subscribers #(cons c# %))))
+
+       :else nil)
+     (recur (<! ~channel))))
+
+;; TODO: use this node when Cursive has decent macro support
+(defmacro defnode
+  [constructor-name type args & body]
+  `(do (core/defn ~constructor-name ~args ~@body)
+       (register-constructor! ~type ~constructor-name)))
+
 ;; TODO: implement leasing in the source nodes
 ;; TODO: priority queue for leasing
 ;; TODO: timeout must be a period (e.g. t/minutes)
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
 (core/defn make-source-node
-  [node-type return-type & {:keys [timeout] :or {timeout false}}]
+  [return-type & {:keys [timeout] :or {timeout false}}]
   (let [in (chan)
         id (new-id!)]
     (go-loop [msg (<! in)
@@ -290,41 +358,8 @@
 
         ;; TODO: error?
         :else (recur (<! in) subs pm value)))
-    (Source. id node-type return-type in in)))
-
-(core/defn subscribe-input
-  [input]
-  (let [c (chan)]
-    (node-subscribe input c)
-    c))
-
-(core/defn subscribe-inputs
-  [inputs]
-  (map subscribe-input inputs))
-
-;; TODO: use this in all nodes
-(defmacro send-subscribers
-  [subscribers changed? value id]
-  `(doseq [sub# @~subscribers]
-     (>! sub# {:changed? ~changed? :value ~value :from ~id})))
-
-(defmacro subscriber-loop
-  [id channel subscribers]
-  `(go-loop [in# (<! ~channel)]
-     (match in#
-       {:subscribe c#}
-       (do (log/debug (str "node " ~id " has received subscriber message"))
-           (if (started?)
-             (throw (Exception. "can not add subscribers to nodes when started"))
-             (swap! ~subscribers #(cons c# %))))
-
-       :else nil)
-     (recur (<! ~channel))))
-
-;; TODO: for generic node construction
-(defmacro defnode
-  [name inputs bindings & body]
-  `(throw (Exception. "TODO")))
+    (Source. id ::source return-type in in)))
+(register-constructor! ::source make-source-node)
 
 ;; input nodes = the actual node records
 ;; inputs = input channels
@@ -361,6 +396,7 @@
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
     (Node. id ::map-to-hash ::hash sub-chan)))
+(register-constructor! ::map-to-hash make-map-hash-node)
 
 ;; TODO: tests
 (core/defn make-map-multiset-node
@@ -384,6 +420,7 @@
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
     (Node. id ::map-to-multiset ::multiset sub-chan)))
+(register-constructor! ::map-to-multiset make-map-multiset-node)
 
 ;; TODO: tests
 (core/defn make-do-apply-node
@@ -403,7 +440,8 @@
       (recur (map <!! inputs)
              #_(<! (first inputs))
              #_(for [input inputs] (<! input))))
-    (Sink. id false)))
+    (Sink. id ::do-apply)))
+(register-constructor! ::do-apply make-do-apply-node)
 
 ;; TODO: say false when no new element is added to the filtered set?
 ;; TODO: tests
@@ -433,6 +471,7 @@
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
     (Node. id ::filter (:return-type input-node) sub-chan)))
+(register-constructor! ::filter make-filter-node)
 
 ;; TODO: put in docstring that it emits empty hash or set
 ;; TODO: make sure it still works with leasing
@@ -497,6 +536,7 @@
                   (>! sub {:changed? false :value delayed :from id}))
                 (recur (<! input) previous delayed))))
     (Node. id ::delay (:return-type input-node) sub-chan)))
+(register-constructor! ::delay make-delay-node)
 
 (core/defn make-zip-node
   [left-node right-node]
@@ -532,6 +572,7 @@
               (>! sub {:changed? false :value zipped :from id}))
             (recur (<! left-in) (<! right-in) zipped))))
     (Node. id ::zip ::hash sub-chan)))
+(register-constructor! ::zip make-zip-node)
 
 ;; TODO: output as a hash?
 ;; TODO: test
@@ -557,6 +598,7 @@
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
     (Node. id ::multiplicities ::multiset sub-chan)))
+(register-constructor! ::multiplicities make-multiplicities-node)
 
 ;; TODO: test
 (core/defn make-reduce-node
@@ -582,6 +624,7 @@
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
     (Node. id ::reduce ::multiset sub-chan)))
+(register-constructor! ::reduce make-reduce-node)
 
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
 ;; The reason for this is that if we would not do this, the buffer for the trigger channel would fill up,
@@ -609,6 +652,7 @@
               (>! sub {:changed? false :value (:value msg) :from id}))
             (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
     (Node. id ::throttle (:return-type input-node) sub-chan)))
+(register-constructor! ::throttle make-throttle-node)
 
 (comment
   "Semantics buffer of size 2, multiset, after leasing/buffer"
@@ -698,6 +742,7 @@
                   (>! sub {:changed? false :value buffer :from id}))
                 (recur (<! input) previous buffer-list buffer))))
     (Node. id ::buffer (:return-type input-node) sub-chan)))
+(register-constructor! ::buffer make-buffer-node)
 
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
@@ -713,9 +758,10 @@
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
 ;; TODO: something something polling time
 ;; TODO: error if key not present
+;; TODO: maybe rename to redis-input
 (core/defn make-redis
   [host queue & {:keys [key] :or {key false}}]
-  (let [node (make-source-node ::redis (if key ::hash ::multiset))
+  (let [node (make-source-node (if key ::hash ::multiset))
         id (:id node)
         pool (JedisPool. host)
         conn (.getResource pool)]
@@ -729,8 +775,6 @@
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur values)))
     (make-signal node)))
-
-;; TODO: maybe rename to redis-input
 (def redis make-redis)
 
 ;; For incremental etc: keep dict of input => output for elements
@@ -823,7 +867,7 @@
 (core/defn throttle
   [signal ms]
   (if (v/signal? signal)
-    (let [source-node (make-source-node ::throttle-trigger ::multiset)
+    (let [source-node (make-source-node ::multiset)
           throttle-node (make-throttle-node (v/value signal) source-node)]
       (>!! (:in *coordinator*) {:new-source (:in source-node)})
       (threadloop []
