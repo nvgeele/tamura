@@ -13,7 +13,7 @@
             [tamura.macros :as macros]
             [tamura.values :as v]
             [tamura.funcs :as funcs])
-  (:import [redis.clients.jedis JedisPool]
+  (:import [redis.clients.jedis Jedis JedisPool]
            [java.util LinkedList]))
 
 (p/import-vars
@@ -190,40 +190,66 @@
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
 
+(declare ^:dynamic ^:private *coordinator*)
+
 ;;;;;;;;
 
 (def nodes (atom {}))
 (def graph (atom {}))
+(def sources (atom []))
 (def node-constructors (atom {}))
 
 (comment
-  {:id Integer
-   :inputs [Integer]
+  {:node-type ::filter
    :node (or nil Node)
+   :inputs [Integer]
+   :outputs []
    :args []})
 
 (core/defn register-node!
   [node]
-  ;; TODO: update signal graph
-  (swap! nodes assoc (:id node) node))
+  (let [id (new-id!)]
+    (swap! nodes assoc id node)
+    (doseq [input-id (:inputs node)]
+      (swap! nodes update-in [input-id :outputs] conj id))
+    id))
 
 (core/defn register-source!
   [node]
-  ;; TODO: you know
-  (register-node! node))
+  (let [id (new-id!)]
+    (swap! sources conj id)
+    (swap! nodes assoc id node)
+    (doseq [input-id (:inputs node)]
+      (swap! nodes update-in [input-id :outputs] conj id))
+    id))
 
+;; NOTE: we assume sources is a vector
+;; TODO: maybe write some tests?
 (core/defn build-nodes! []
-  (comment (let [node-ids (keys @nodes)]
-             (loop [nodes-done (set)]
-               ))))
+  (loop [todo @sources
+         done (set [])]
+    (let [id (first todo)
+          node (get @nodes id)]
+      (cond (empty? todo) true
+            (contains? done id) (recur (vec (rest todo)) done)
+            :else (let [inputs (map #(:node (get @nodes %)) (:inputs node))
+                        node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)
+                        new-todo (reduce (comp vec conj) (vec (rest todo)) (:outputs node))
+                        new-done (conj done id)]
+                    (swap! nodes update-in [id :node] (constantly node-obj))
+                    ;; NOTE: this is a little hack to ensure correct ordering of start/started? messages
+                    ;; We make sure that every node sends at least one message to the coordinator, so the coordinator is not started
+                    ;; before graph construction is finished.
+                    (if (= (:node-type node) ::source)
+                      (>!! (:in *coordinator*) {:new-source (:in node-obj)})
+                      (>!! (:in *coordinator*) :else))
+                    (recur new-todo new-done))))))
 
 (core/defn register-constructor!
   [node-type constructor]
   (swap! node-constructors assoc node-type constructor))
 
 ;;;;;;;;
-
-(declare ^:dynamic ^:private *coordinator*)
 
 (core/defn- started?
   []
@@ -235,6 +261,8 @@
 
 (core/defn start
   []
+  (build-nodes!)
+  (Thread/sleep 1000)
   (>!! (:in *coordinator*) :start))
 
 ;; TODO: do we still need heights?
@@ -310,9 +338,8 @@
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
 (core/defn make-source-node
-  [return-type & {:keys [timeout] :or {timeout false}}]
-  (let [in (chan)
-        id (new-id!)]
+  [id [return-type & {:keys [timeout] :or {timeout false}}] []]
+  (let [in (chan)]
     (go-loop [msg (<! in)
               subs []
               pm (pm/priority-map)
@@ -372,9 +399,8 @@
 ;; TODO: construction finish detection
 ;; TODO: test
 (core/defn make-map-hash-node
-  [input-node f]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
         selector (if (= (:return-type input-node) ::hash) :hash :multiset)]
@@ -400,9 +426,8 @@
 
 ;; TODO: tests
 (core/defn make-map-multiset-node
-  [input-node f]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
         selector (if (= (:return-type input-node) ::hash) :hash :multiset)]
@@ -424,9 +449,8 @@
 
 ;; TODO: tests
 (core/defn make-do-apply-node
-  [input-nodes action]
-  (let [id (new-id!)
-        inputs (subscribe-inputs input-nodes)
+  [id [action] input-nodes]
+  (let [inputs (subscribe-inputs input-nodes)
         selectors (map #(if (= (:return-type %) ::hash) :hash :multiset) input-nodes)]
     (go-loop [msgs
               (map <!! inputs)
@@ -446,9 +470,8 @@
 ;; TODO: say false when no new element is added to the filtered set?
 ;; TODO: tests
 (core/defn make-filter-node
-  [input-node predicate]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [predicate] [input-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
         input-type (:return-type input-node)]
@@ -496,9 +519,8 @@
   {:b 2 :c 1 :a 3}  => {:b 1})
 
 (core/defn make-delay-node
-  [input-node]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [] [input-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
         hash-input? (= (:return-type input-node) ::hash)]
@@ -539,9 +561,8 @@
 (register-constructor! ::delay make-delay-node)
 
 (core/defn make-zip-node
-  [left-node right-node]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [] [left-node right-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         left-in (subscribe-input left-node)
         right-in (subscribe-input right-node)]
@@ -577,9 +598,8 @@
 ;; TODO: output as a hash?
 ;; TODO: test
 (core/defn make-multiplicities-node
-  [input-node]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [] [input-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
     (when-not (= (:return-type input-node) ::multiset)
@@ -602,9 +622,9 @@
 
 ;; TODO: test
 (core/defn make-reduce-node
-  [input-node f & initial]
-  (let [id (new-id!)
-        sub-chan (chan)
+  ;;[id input-node f & initial]
+  [id [f & initial] [input-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
@@ -633,9 +653,11 @@
 ;; The rationale is that a node can only produce a :changed? true value iff all its inputs have been true at least once.
 ;; TODO: make throttle that propages true on every tick AND one that only propagates true if something has changed since
 (core/defn make-throttle-node
-  [input-node trigger-node]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [] [input-node trigger-node]]
+  (println "input node: " input-node)
+  (println "trigger node: " trigger-node)
+  (println (get @nodes 6))
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
         trigger (subscribe-input trigger-node)]
@@ -673,9 +695,8 @@
 
 ;; TODO: deal with removals in chained buffers and so on (also, leasing)
 (core/defn make-buffer-node
-  [input-node size]
-  (let [id (new-id!)
-        sub-chan (chan)
+  [id [size] [input-node]]
+  (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
         hash? (= (:return-type input-node) ::hash)]
@@ -748,10 +769,6 @@
 
 (core/defn- make-signal
   [node]
-  ;; NOTE: this is a little hack to ensure correct ordering of start/started? messages
-  ;; We make sure that every node sends at least one message to the coordinator, so the coordinator is not started
-  ;; before graph construction is finished.
-  (>!! (:in *coordinator*) :else)
   (v/make-signal node))
 
 ;; TODO: redis sink
@@ -761,11 +778,9 @@
 ;; TODO: maybe rename to redis-input
 (core/defn make-redis
   [host queue & {:keys [key] :or {key false}}]
-  (let [node (make-source-node (if key ::hash ::multiset))
-        id (:id node)
-        pool (JedisPool. host)
-        conn (.getResource pool)]
-    (>!! (:in *coordinator*) {:new-source (:in node)})
+  (let [node {:node-type ::source :args [(if key ::hash ::multiset) :key key]}
+        id (register-source! node)
+        conn (Jedis. host)]
     (threadloop [values (if key (make-hash) (make-multiset))]
       (let [v (second (.blpop conn 0 (into-array String [queue])))
             parsed (edn/read-string v)
@@ -774,7 +789,7 @@
                     parsed)]
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur values)))
-    (make-signal node)))
+    (make-signal id)))
 (def redis make-redis)
 
 ;; For incremental etc: keep dict of input => output for elements
@@ -784,39 +799,35 @@
 (core/defn map-to-hash
   [f arg]
   (if (v/signal? arg)
-    (let [source-node (v/value arg)
-          node (make-map-hash-node source-node f)]
-      (make-signal node))
+    (let [input (v/value arg)
+          node {:node-type ::map-to-hash :args [f] :inputs [input]}
+          id (register-node! node)]
+      (make-signal id))
     (throw (Exception. "map-to-hash requires a signal as second argument"))))
 
 ;; TODO: test
 (core/defn map-to-multiset
   [f arg]
   (if (v/signal? arg)
-    (let [source-node (v/value arg)
-          node (make-map-multiset-node source-node f)]
+    (let [input (v/value arg)
+          node (register-node! {:node-type ::map-to-multiset :args [f] :inputs [input]})]
       (make-signal node))
     (throw (Exception. "map-to-multiset requires a signal as second argument"))))
-
-(core/defn lift
-  [f]
-  (fn [arg]
-    (if (v/signal? arg)
-      (map f arg)
-      (throw (Exception. "Argument for lifted function should be a signal")))))
 
 ;; TODO: make this a sink
 (core/defn do-apply
   [f arg & args]
   (if (andmap v/signal? (cons arg args))
-    (make-signal (make-do-apply-node (map v/value (cons arg args)) f))
+    (let [inputs (map v/value (cons arg args))
+          node (register-node! {:node-type ::do-apply :args [f] :inputs inputs})]
+      (make-signal node))
     (throw (Exception. "do-apply needs to be applied to signals"))))
 
 (core/defn filter
   [f arg]
   (if (v/signal? arg)
-    (let [source-node (v/value arg)
-          node (make-filter-node source-node f)]
+    (let [input (v/value arg)
+          node (register-node! {:node-type ::filter :args [f] :inputs [input]})]
       (make-signal node))
     (core/filter f arg)))
 
@@ -829,35 +840,36 @@
 (core/defn delay
   [arg]
   (if (v/signal? arg)
-    (let [source-node (v/value arg)
-          node (make-delay-node source-node)]
+    (let [input (v/value arg)
+          node (register-node! {:node-type ::delay :args [] :inputs [input]})]
       (make-signal node))
     (throw (Exception. "argument to delay should be a signal"))))
 
 (core/defn zip
   [left right]
   (if (and (v/signal? left) (v/signal? right))
-    (make-signal (make-zip-node (v/value left) (v/value right)))
+    (let [left (v/value left)
+          right (v/value right)
+          node (register-node! {:node-type ::zip :args [] :inputs [left right]})]
+      (make-signal node))
     (throw (Exception. "arguments to zip should be signals"))))
 
 (core/defn multiplicities
   [arg]
   (if (v/signal? arg)
-    (make-signal (make-multiplicities-node (v/value arg)))
+    (let [input (v/value arg)
+          node (register-node! {:node-type ::multiplicities :args [] :inputs [input]})]
+      (make-signal node))
     (throw (Exception. "argument to delay should be a signal"))))
 
 (core/defn reduce
   ([f arg]
    (if (v/signal? arg)
-     (-> (v/value arg)
-         (make-reduce-node f)
-         (make-signal))
+     (make-signal (register-node! {:node-type ::reduce :args [f] :inputs [(v/value arg)]}))
      (core/reduce f arg)))
   ([f val coll]
    (if (v/signal? coll)
-     (-> (v/value coll)
-         (make-reduce-node f val)
-         (make-signal))
+     (make-signal (register-node! {:node-type ::reduce :args [f val] :inputs [(v/value coll)]}))
      (core/reduce f val coll))))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
@@ -867,23 +879,21 @@
 (core/defn throttle
   [signal ms]
   (if (v/signal? signal)
-    (let [source-node (make-source-node ::multiset)
-          throttle-node (make-throttle-node (v/value signal) source-node)]
-      (>!! (:in *coordinator*) {:new-source (:in source-node)})
+    (let [trigger (register-source! {:node-type ::source :args [::multiset]})
+          node (register-source! {:node-type ::throttle :args [ms] :inputs [(v/value signal) trigger]})]
+      (println "BLERP: " (v/value signal))
       (threadloop []
         (Thread/sleep ms)
-        (>!! (:in *coordinator*) {:destination (:id source-node) :value nil})
+        (>!! (:in *coordinator*) {:destination trigger :value nil})
         (recur))
-      (make-signal throttle-node))
+      (make-signal node))
     (throw (Exception. "first argument of throttle must be signal"))))
 
 ;; TODO: corner case size 0
 (core/defn buffer
   [sig size]
   (if (v/signal? sig)
-    (let [source-node (v/value sig)
-          node (make-buffer-node source-node size)]
-      (make-signal node))
+    (make-signal (register-source! {:node-type ::buffer :args [size] :inputs [(v/value sig)]}))
     (throw (Exception. "first argument to delay should be a signal"))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
