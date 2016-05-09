@@ -12,11 +12,12 @@
 
 (def test-fns (atom []))
 
+;; NOTE: the node-init function takes the source node for the test as its sole argument
 (defmacro test-node
   [type timeout node-init & body]
-  `(let [source-node# (core/make-source-node ~type :timeout ~timeout)
+  `(let [source-id# (core/new-id!)
+         source-node# (core/make-source-node source-id# [~type :timeout ~timeout] [])
          init# ~node-init
-         source-id# (:id source-node#)
          test-chan# (core/chan)]
      (if init#
        (core/node-subscribe (init# source-node#) test-chan#)
@@ -118,7 +119,7 @@
   (facts "about delay after leased hash source node"
     (test-node ::core/hash
       (t/seconds 2)
-      #(core/make-delay-node %)
+      #(core/make-delay-node (core/new-id!) [] [%])
 
       (send [:a 1])
       (receive) => {}
@@ -144,7 +145,7 @@
   (facts "about delay after leased multiset source node"
     (test-node ::core/multiset
       (t/seconds 2)
-      #(core/make-delay-node %)
+      #(core/make-delay-node (core/new-id!) [] [%])
 
       (send 1)
       (receive) => (ms/multiset)
@@ -167,7 +168,7 @@
   (facts "about buffer after leased hash source node"
     (test-node ::core/hash
       (t/seconds 2)
-      #(core/make-buffer-node % 2)
+      #(core/make-buffer-node (core/new-id!) [2] [%])
 
       (send [:a 1])
       (receive) => {:a 1}
@@ -188,7 +189,7 @@
   (facts "about buffer after leased multiset source node"
     (test-node ::core/multiset
       (t/seconds 2)
-      #(core/make-buffer-node % 2)
+      #(core/make-buffer-node (core/new-id!) [2] [%])
 
       (send 1)
       (receive) => (ms/multiset 1)
@@ -211,7 +212,7 @@
 ;; TODO: tests for buffer after delay?
 (facts "about buffer-node"
   (facts "about multiset buffer-node"
-    (test-multiset-node #(core/make-buffer-node % 3)
+    (test-multiset-node #(core/make-buffer-node (core/new-id!) [3] [%])
       (send 1)
       (receive) => (ms/multiset 1)
 
@@ -227,7 +228,7 @@
       (send 4)
       (receive) => (ms/multiset 3 4 4)))
   (facts "about hash buffer-node"
-    (test-hash-node #(core/make-buffer-node % 3)
+    (test-hash-node #(core/make-buffer-node (core/new-id!) [3] [%])
       (send [:a 1])
       (receive) => {:a 1}
 
@@ -248,7 +249,7 @@
 
 (facts "about make-delay-node"
   (facts "about make-delay-node with multisets"
-    (test-multiset-node #(core/make-delay-node %)
+    (test-multiset-node #(core/make-delay-node (core/new-id!) [] [%])
       (send 1)
       (receive) => (ms/multiset)
 
@@ -258,7 +259,7 @@
       (send 3)
       (receive) => (ms/multiset 1 2)))
   (facts "about make-delay-node with hashes"
-    (test-hash-node #(core/make-delay-node %)
+    (test-hash-node #(core/make-delay-node (core/new-id!) [] [%])
       (send [1 {:v 1}])
       (receive) => {}
 
@@ -272,7 +273,7 @@
       (receive) => {1 {:v 1} 2 {:v 1}})))
 
 (facts "about make-multiplicities-node"
-  (test-multiset-node #(core/make-multiplicities-node %)
+  (test-multiset-node #(core/make-multiplicities-node (core/new-id!) [] [%])
     (send 'a)
     (receive) => (ms/multiset ['a 1])
 

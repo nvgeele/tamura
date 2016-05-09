@@ -227,6 +227,7 @@
     id))
 
 ;; TODO: write appropriate test-code
+;; TODO: build graph whilst sorting?
 (core/defn sort-nodes
   []
   (let [visited (atom (set []))
@@ -243,28 +244,20 @@
           (do (sort-rec (first roots))
               (recur (rest roots))))))))
 
-;; NOTE: we assume sources is a vector
 ;; TODO: maybe write some tests?
-;; TODO: sort nodes before building them
 (core/defn build-nodes! []
-  (loop [todo @sources
-         done (set [])]
-    (let [id (first todo)
-          node (get @nodes id)]
-      (cond (empty? todo) true
-            (contains? done id) (recur (vec (rest todo)) done)
-            :else (let [inputs (map #(:node (get @nodes %)) (:inputs node))
-                        node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)
-                        new-todo (reduce (comp vec conj) (vec (rest todo)) (:outputs node))
-                        new-done (conj done id)]
-                    (swap! nodes update-in [id :node] (constantly node-obj))
-                    ;; NOTE: this is a little hack to ensure correct ordering of start/started? messages
-                    ;; We make sure that every node sends at least one message to the coordinator, so the coordinator is not started
-                    ;; before graph construction is finished.
-                    (if (= (:node-type node) ::source)
-                      (>!! (:in *coordinator*) {:new-source (:in node-obj)})
-                      (>!! (:in *coordinator*) :else))
-                    (recur new-todo new-done))))))
+  (loop [sorted (sort-nodes)]
+    (if (empty? sorted)
+      true
+      (let [id (first sorted)
+            node (get @nodes id)
+            inputs (map #(:node (get @nodes %)) (:inputs node))
+            node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)]
+        (swap! nodes update-in [id :node] (constantly node-obj))
+        (if (= (:node-type node) ::source)
+          (>!! (:in *coordinator*) {:new-source (:in node-obj)})
+          (>!! (:in *coordinator*) :else))
+        (recur (rest sorted))))))
 
 (core/defn register-constructor!
   [node-type constructor]
@@ -283,6 +276,7 @@
 (core/defn start
   []
   (build-nodes!)
+  ;; TODO: remove the sleep...
   (Thread/sleep 1000)
   (>!! (:in *coordinator*) :start))
 
@@ -675,9 +669,6 @@
 ;; TODO: make throttle that propages true on every tick AND one that only propagates true if something has changed since
 (core/defn make-throttle-node
   [id [] [input-node trigger-node]]
-  (println "input node: " input-node)
-  (println "trigger node: " trigger-node)
-  (println (get @nodes 6))
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
@@ -901,8 +892,7 @@
   [signal ms]
   (if (v/signal? signal)
     (let [trigger (register-source! {:node-type ::source :args [::multiset]})
-          node (register-source! {:node-type ::throttle :args [ms] :inputs [(v/value signal) trigger]})]
-      (println "BLERP: " (v/value signal))
+          node (register-node! {:node-type ::throttle :args [ms] :inputs [(v/value signal) trigger]})]
       (threadloop []
         (Thread/sleep ms)
         (>!! (:in *coordinator*) {:destination trigger :value nil})

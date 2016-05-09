@@ -1,5 +1,6 @@
 (ns examples.bxl-direct
-  (:require [tamura.core :as t]))
+  (:require [tamura.core :as t]
+            [examples.spawner :as s]))
 
 ;;;;;;;;;;;;;;;
 
@@ -46,4 +47,5 @@
 (defn -main
   [& args]
   (t/start)
+  (s/spawn-threads "localhost" "bxlqueue" 10)
   (println "Ready"))
