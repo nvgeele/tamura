@@ -195,7 +195,6 @@
 ;;;;;;;;
 
 (def nodes (atom {}))
-(def graph (atom {}))
 (def sources (atom []))
 (def node-constructors (atom {}))
 
@@ -205,6 +204,12 @@
    :inputs [Integer]
    :outputs []
    :args []})
+
+(core/defn reset-graph!
+  []
+  (swap! nodes (constantly {}))
+  (swap! sources (constantly []))
+  (swap! counter (constantly 0)))
 
 (core/defn register-node!
   [node]
@@ -219,12 +224,28 @@
   (let [id (new-id!)]
     (swap! sources conj id)
     (swap! nodes assoc id node)
-    (doseq [input-id (:inputs node)]
-      (swap! nodes update-in [input-id :outputs] conj id))
     id))
+
+;; TODO: write appropriate test-code
+(core/defn sort-nodes
+  []
+  (let [visited (atom (set []))
+        sorted (atom [])]
+    (letfn [(sort-rec [node]
+              (when-not (contains? @visited node)
+                (doseq [output (:outputs (get @nodes node))]
+                  (sort-rec output))
+                (swap! visited conj node)
+                (swap! sorted #(cons node %))))]
+      (loop [roots @sources]
+        (if (empty? roots)
+          @sorted
+          (do (sort-rec (first roots))
+              (recur (rest roots))))))))
 
 ;; NOTE: we assume sources is a vector
 ;; TODO: maybe write some tests?
+;; TODO: sort nodes before building them
 (core/defn build-nodes! []
   (loop [todo @sources
          done (set [])]
