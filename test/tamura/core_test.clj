@@ -65,8 +65,8 @@
     (test-fn)))
 
 ;; TODO: test a changed? false send too?
-
 ;; TODO: tests for data structures?
+;; TODO: change tests so they use the whole static build system thingy
 
 (facts "about leasing"
   (facts "about leasing multiset source nodes"

@@ -192,18 +192,9 @@
 
 (declare ^:dynamic ^:private *coordinator*)
 
-;;;;;;;;
-
 (def nodes (atom {}))
 (def sources (atom []))
 (def node-constructors (atom {}))
-
-(comment
-  {:node-type ::filter
-   :node (or nil Node)
-   :inputs [Integer]
-   :outputs []
-   :args []})
 
 (core/defn reset-graph!
   []
@@ -263,8 +254,6 @@
   [node-type constructor]
   (swap! node-constructors assoc node-type constructor))
 
-;;;;;;;;
-
 (core/defn- started?
   []
   (let [c (chan 0)
@@ -280,7 +269,6 @@
   (Thread/sleep 1000)
   (>!! (:in *coordinator*) :start))
 
-;; TODO: do we still need heights?
 ;; TODO: phase2 of multiclock reactive programming (detect when construction is done) (or cheat and Thread/sleep)
 (core/defn make-coordinator
   []
