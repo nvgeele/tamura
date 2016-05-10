@@ -78,7 +78,7 @@ crashlytics-build.properties
 fabric.properties
 
 ### Intellij Patch ###
-*.iml
+# *.iml
 
 /target
 /classes
