@@ -264,6 +264,8 @@
 
 (core/defn start
   []
+  (when (started?)
+    (throw (Exception. "already started")))
   (build-nodes!)
   ;; TODO: remove the sleep...
   (Thread/sleep 1000)
