@@ -13,6 +13,7 @@
 (def test-fns (atom []))
 
 ;; NOTE: the node-init function takes the source node for the test as its sole argument
+;; TODO: buffer!
 (defmacro test-node
   [type timeout node-init & body]
   `(let [source-id# (core/new-id!)
@@ -38,8 +39,10 @@
   `(test-node ::core/hash false ~node-init ~@body))
 
 (defn send
-  [value]
-  (>!! *source-chan* {:destination *source-id* :value value}))
+  ([value]
+   (>!! *source-chan* {:destination *source-id* :value value}))
+  ([key val]
+    (send [key val])))
 
 (defn receive-hash
   []
@@ -57,9 +60,11 @@
     (throw (Exception. "*current-type* not bound"))))
 
 (defn send-receive
-  [value]
-  (send value)
-  (receive))
+  ([value]
+   (send value)
+   (receive))
+  ([key val]
+    (send-receive [key val])))
 
 ;; TODO: capture test metadata
 (defn do-tests
@@ -79,19 +84,28 @@
   (facts "multiset"
     (test-multiset-node false
       (send-receive 1) => (ms/multiset 1)
-
       (send-receive 2) => (ms/multiset 1 2)
-
       (send-receive 3) => (ms/multiset 1 2 3)))
   (facts "hash"
     (test-hash-node false
-      (send-receive [:a 1]) => {:a [1]}
+      (send-receive :a 1) => {:a [1]}
+      (send-receive :b 1) => {:a [1] :b [1]}
+      (send-receive :a 2) => {:a [1 2] :b [1]}
+      (send-receive :a 3) => {:a [1 2 3] :b [1]})))
 
-      (send-receive [:b 1]) => {:a [1] :b [1]}
-
-      (send-receive [:a 2]) => {:a [1 2] :b [1]}
-
-      (send-receive [:a 3]) => {:a [1 2 3] :b [1]})))
+(facts "about buffered source nodes"
+  (facts "multiset"
+    (test-node ::core/multiset false false 2
+      (send-receive 1) => (ms/multiset 1)
+      (send-receive 2) => (ms/multiset 1 2)
+      (send-receive 3) => (ms/multiset 2 3)))
+  (facts "hash"
+    (test-node ::core/hash false false 2
+      (send-receive :a 1) => {:a [1]}
+      (send-receive :b 1) => {:a [1] :b [1]}
+      (send-receive :c 1) => {:a [1] :b [1] :c [1]}
+      (send-receive :a 2) => {:a [1 2] :b [1] :c [1]}
+      (send-receive :a 3) => {:a [2 3] :b [1] :c [1]})))
 
 (comment
   (facts "about time-based leasing"
@@ -117,11 +131,6 @@
 
         (send 4)
         (receive) => (ms/multiset 4)))
-    (facts "hash")))
-
-(comment
-  (facts "about buffered source nodes"
-    (facts "multiset")
     (facts "hash")))
 
 (comment
