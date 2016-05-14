@@ -348,33 +348,34 @@
 ;; TODO: ping node to do leasing now and then
 
 (core/defn make-source-node
-  [id [return-type & {:keys [timeout] :or {timeout false}}] []]
+  [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
   (let [in (chan)]
     (go-loop [msg (<! in)
               subs []
               pm (pm/priority-map)
-              value (if (= return-type ::multiset) (make-multiset) (make-hash))]
+              buffer-list (LinkedList.)
+              value (if (= return-type :multiset) (make-multiset) (make-hash))]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
         {:subscribe subscriber}
-        (recur (<! in) (cons subscriber subs) pm value)
+        (recur (<! in) (cons subscriber subs) pm buffer-list value)
 
         {:destination id :value new-value}
-        (let [new-coll (if (= return-type ::multiset)
+        (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-update value (first new-value) #(conj (if % % []) (second new-value))))]
           (send-subscribers subs true new-coll id)
-          (recur (<! in) subs pm new-coll))
+          (recur (<! in) subs pm buffer-list new-coll))
 
         {:destination _}
         (do (doseq [sub subs]
               (>! sub {:changed? false
                        :value    value
                        :origin   id}))
-            (recur (<! in) subs pm value))
+            (recur (<! in) subs pm buffer-list value))
 
         ;; TODO: error?
-        :else (recur (<! in) subs pm value)))
+        :else (recur (<! in) subs pm buffer-list value)))
     (Source. id ::source return-type in in)))
 (comment
   (core/defn make-source-node
