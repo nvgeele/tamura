@@ -13,6 +13,7 @@
             [tamura.macros :as macros]
             [tamura.values :as v]
             [tamura.funcs :as funcs])
+  (:use [tamura.datastructures])
   (:import [redis.clients.jedis Jedis JedisPool]
            [java.util LinkedList]))
 
@@ -88,92 +89,6 @@
 (defmacro threadloop
   [bindings & body]
   `(thread (loop ~bindings ~@body)))
-
-
-;; TODO: leasing operations in datastructures?
-
-(core/defn make-hash
-  ([]
-    (make-hash {}))
-  ([hash]
-    {:type ::hash :hash hash}))
-
-(core/defn hash?
-  [x]
-  (= (:type x) ::hash))
-
-(core/defn hash-contains?
-  [hash key]
-  (let [hash (:hash hash)]
-    (contains? hash key)))
-
-(core/defn hash-get
-  [hash key]
-  (let [hash (:hash hash)]
-    (get hash key)))
-
-(core/defn hash-keys
-  [hash]
-  (let [hash (:hash hash)]
-    (keys hash)))
-
-(core/defn hash-insert
-  [hash key val]
-  (make-hash (assoc (:hash hash) key val)))
-
-(core/defn hash-update
-  [hash key f]
-  (-> (:hash hash)
-      (update key f)
-      (make-hash)))
-
-(core/defn hash-remove
-  [hash key]
-  (make-hash (dissoc (:hash hash) key)))
-
-(core/defn hash->set
-  [hash]
-  (set (:hash hash)))
-
-(core/defn make-multiset
-  ([]
-   (make-multiset (ms/multiset)))
-  ([multiset]
-   {:type ::multiset :multiset multiset}))
-
-(core/defn multiset?
-  [x]
-  (= (:type x) ::multiset))
-
-(core/defn multiset-contains?
-  [ms val]
-  (contains? (:multiset ms) val))
-
-(core/defn multiset-multiplicities
-  [ms]
-  (ms/multiplicities (:multiset ms)))
-
-(core/defn multiset-insert
-  [ms val]
-  (-> (:multiset ms)
-      (conj val)
-      (make-multiset)))
-
-(core/defn multiset-remove
-  [ms val]
-  (-> (:multiset ms)
-      (disj val)
-      (make-multiset)))
-
-(core/defn multiset-minus
-  [l r]
-  (-> (ms/minus (:multiset l) (:multiset r))
-      (make-multiset)))
-
-(core/defn multiset-union
-  [l r]
-  (-> (ms/union (:multiset l) (:multiset r))
-      (make-multiset)))
 
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
@@ -384,7 +299,7 @@
       (go-loop [msg (<! in)
                 subs []
                 pm (pm/priority-map)
-                value (if (= return-type ::multiset) (make-multiset) (make-hash))]
+                value (if (= return-type :multiset) (make-multiset) (make-hash))]
         (log/debug (str "source " id " has received: " (seq msg)))
         (match msg
           {:subscribe subscriber}
@@ -393,7 +308,7 @@
           {:destination id :value new-value}
           (let [now (t/now)
                 cutoff (when timeout (t/minus now timeout))
-                new-coll (if (= return-type ::multiset)
+                new-coll (if (= return-type :multiset)
                            (multiset-insert value new-value)
                            (hash-insert value (first new-value) (second new-value)))
                 new-pm (when timeout
@@ -404,7 +319,7 @@
                          coll new-coll]
                     (let [[v t] (peek pm)]
                       (if (t/before? t cutoff)
-                        (let [coll (if (= return-type ::multiset)
+                        (let [coll (if (= return-type :multiset)
                                      (multiset-remove coll v)
                                      (hash-remove coll v))
                               pm (pop pm)]
@@ -444,7 +359,7 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
-        selector (if (= (:return-type input-node) ::hash) :hash :multiset)]
+        selector (if (= (:return-type input-node) :hash) :hash :multiset)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-hash)]
@@ -462,7 +377,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. id ::map-to-hash ::hash sub-chan)))
+    (Node. id ::map-to-hash :hash sub-chan)))
 (register-constructor! ::map-to-hash make-map-hash-node)
 
 ;; TODO: tests
@@ -471,7 +386,7 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
-        selector (if (= (:return-type input-node) ::hash) :hash :multiset)]
+        selector (if (= (:return-type input-node) :hash) :hash :multiset)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-multiset)]
@@ -485,14 +400,14 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. id ::map-to-multiset ::multiset sub-chan)))
+    (Node. id ::map-to-multiset :multiset sub-chan)))
 (register-constructor! ::map-to-multiset make-map-multiset-node)
 
 ;; TODO: tests
 (core/defn make-do-apply-node
   [id [action] input-nodes]
   (let [inputs (subscribe-inputs input-nodes)
-        selectors (map #(if (= (:return-type %) ::hash) :hash :multiset) input-nodes)]
+        selectors (map #(if (= (:return-type %) :hash) :hash :multiset) input-nodes)]
     (go-loop [msgs
               (map <!! inputs)
               #_(<! (first inputs))
@@ -521,11 +436,11 @@
               value nil]
       (log/debug (str "filter-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (if (= input-type ::hash)
+        (let [values (if (= input-type :hash)
                        (:hash (:value msg))
                        (:multiset (:value msg)))
               filtered (filter predicate values)
-              new (if (= input-type ::hash)
+              new (if (= input-type :hash)
                     (make-hash (into {} filtered))
                     (make-multiset (apply ms/multiset filtered)))]
           (doseq [sub @subscribers]
@@ -545,7 +460,7 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
-        hash-input? (= (:return-type input-node) ::hash)]
+        hash-input? (= (:return-type input-node) :hash)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               previous (set nil)
@@ -588,8 +503,8 @@
         subscribers (atom [])
         left-in (subscribe-input left-node)
         right-in (subscribe-input right-node)]
-    (when-not (and (= (:return-type left-node) ::hash)
-                   (= (:return-type right-node) ::hash))
+    (when-not (and (= (:return-type left-node) :hash)
+                   (= (:return-type right-node) :hash))
       (throw (Exception. "inputs to zip must have hashes as return types")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [l (<! left-in)
@@ -614,7 +529,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value zipped :from id}))
             (recur (<! left-in) (<! right-in) zipped))))
-    (Node. id ::zip ::hash sub-chan)))
+    (Node. id ::zip :hash sub-chan)))
 (register-constructor! ::zip make-zip-node)
 
 ;; TODO: output as a hash?
@@ -624,7 +539,7 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) ::multiset)
+    (when-not (= (:return-type input-node) :multiset)
       (throw (Exception. "input to multiplicities must have multiset as return type")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
@@ -639,7 +554,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. id ::multiplicities ::multiset sub-chan)))
+    (Node. id ::multiplicities :multiset sub-chan)))
 (register-constructor! ::multiplicities make-multiplicities-node)
 
 ;; TODO: test
@@ -665,7 +580,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value value :from id}))
             (recur (<! input) value))))
-    (Node. id ::reduce ::multiset sub-chan)))
+    (Node. id ::reduce :multiset sub-chan)))
 (register-constructor! ::reduce make-reduce-node)
 
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
@@ -701,7 +616,7 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
-        hash? (= (:return-type input-node) ::hash)]
+        hash? (= (:return-type input-node) :hash)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               previous nil
@@ -780,7 +695,7 @@
 ;; TODO: maybe rename to redis-input
 (core/defn make-redis
   [host queue & {:keys [key] :or {key false}}]
-  (let [node {:node-type ::source :args [(if key ::hash ::multiset) :key key]}
+  (let [node {:node-type ::source :args [(if key :hash :multiset) :key key]}
         id (register-source! node)
         conn (Jedis. host)]
     (threadloop [values (if key (make-hash) (make-multiset))]
@@ -881,7 +796,7 @@
 (core/defn throttle
   [signal ms]
   (if (v/signal? signal)
-    (let [trigger (register-source! {:node-type ::source :args [::multiset]})
+    (let [trigger (register-source! {:node-type ::source :args [:multiset]})
           node (register-node! {:node-type ::throttle :args [ms] :inputs [(v/value signal) trigger]})]
       (threadloop []
         (Thread/sleep ms)
@@ -906,40 +821,97 @@
   [signal]
   `(do-apply #(locking *out* (println (quote ~signal) ": " %)) ~signal))
 
-(comment
-  "Semantics map-to-hash -- multiset"
+;; TODO: what about mapping over all values for a key
+;; TODO: what about reducing
+(comment reduce-per-key)
+(comment hash-values)
 
-  "Hash")
+;; TODO: buffer on key
+;; NOTE: if the collections are *fully* reactive, and the hash becomes too big (as in too many keys), sharding and
+;; saving shards to persistent storage might be feasible
+(comment "Semantics source with buffering (size 3)"
+  "multiset"
+  1 => #{1}
+  2 => #{1 2}
+  3 => #{1 2 3}
+  4 => #{2 3 4}
 
-(comment
-  "Semantics map-to-multiset -- multiset"
+  "hash"
+  [:a 1] => {:a [1]}
+  [:b 1] => {:a [1] :b [1]}
+  [:a 2] => {:a [1 2] :b [1]}
+  [:a 3] => {:a [1 2 3] :b [1]}
+  [:a 4] => {:a [2 3 4] :b [1]}
+  [:c 1] => {:a [2 3 4] :b [1] :c [1]}
+  [:d 1] => {:a [2 3 4] :b [1] :c [1] :d [1]})
 
-  "Hash")
+(comment "Semantics source with time-based leasing (10 seconds)"
+  "multiset"
+  1 => #{1}
+  2 => #{1 2}
+  - 10 seconds wait -
+  3 => #{3}
 
-(comment
-  "Semantics do-apply -- multiset"
+  "hash"
+  [:a 1] => {:a [1]}
+  [:b 1] => {:a [1] :b [1]}
+  [:a 2] => {:a [1 2] :b [1]}
+  - 10 seconds wait -
+  [:a 3] => {:a [3]}
+  - 5 seconds wait -
+  [:a 4] => {:a [3 4]}
+  - 5 seconds wait -
+  [:a 5] => {:a [4 5]})
 
-  "Hash")
+(comment "Semantics buffer (size 3)"
+  "multiset"
 
-(comment
-  "Semantics filter -- multiset"
+  "hash")
 
-  "Hash")
+(comment "Semantics source with time-based leasing (10 seconds)"
+  "multiset"
 
-(comment
-  "Semantics zip -- multiset"
+  "hash")
 
-  "Hash")
+(comment "Semantics map-to-hash"
+  "multiset"
 
-(comment
-  "Semantics multiplicities -- multiset"
+  "hash")
 
-  "Hash")
+(comment "Semantics map-to-multiset"
+  "multiset"
 
-(comment
-  "Semantics reduce -- multiset"
+  "hash")
 
-  "Hash")
+(comment "Semantics do-apply"
+  "multiset"
+
+  "hash")
+
+;; TODO: filter specific for hash (filter-keys? and filter-values)?
+(comment filter-per-key filter-key)
+
+(comment "Semantics filter"
+  "multiset"
+
+  "hash")
+
+(comment "Semantics zip"
+  "multiset"
+
+  "hash")
+
+(comment "Semantics multiplicities"
+  "multiset"
+
+  "hash")
+
+(comment "Semantics reduce"
+  "multiset"
+
+  "hash")
+
+;; TODO: something special for hashes called previous?
 
 (comment
   "Semantics delay, multiset, after leasing/buffer"
@@ -976,8 +948,6 @@
   {:a [1] :b [1] :c [1]} => {:b [1] :c [1]}
   {:d [1]}               => {:d [1]}
   {:d [1] :e [1]}        => {:d [1] :e [1]})
-
-;; TODO: filter specific for hash (filter-keys? and filter-values)?
 
 (core/defn -main
   [& args]
