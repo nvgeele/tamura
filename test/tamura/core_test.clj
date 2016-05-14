@@ -56,6 +56,11 @@
     ::core/hash (receive-hash)
     (throw (Exception. "*current-type* not bound"))))
 
+(defn send-receive
+  [value]
+  (send value)
+  (receive))
+
 ;; TODO: capture test metadata
 (defn do-tests
   []
@@ -71,29 +76,53 @@
 ;; TODO: send-receive hybrid
 
 (facts "about simple sources"
-  (facts "about multiset simple source"
+  (facts "multiset"
     (test-multiset-node false
-      (send 1)
-      (receive) => (ms/multiset 1)
+      (send-receive 1) => (ms/multiset 1)
 
-      (send 2)
-      (receive) => (ms/multiset 2)
+      (send-receive 2) => (ms/multiset 1 2)
 
-      (send 3)
-      (receive) => (ms/multiset 3)))
-  (facts "about hash simple source"
+      (send-receive 3) => (ms/multiset 1 2 3)))
+  (facts "hash"
     (test-hash-node false
-      (send [:a 1])
-      (receive) => {:a [1]}
+      (send-receive [:a 1]) => {:a [1]}
 
-      (send [:b 1])
-      (receive) => {:a [1] :b [1]}
+      (send-receive [:b 1]) => {:a [1] :b [1]}
 
-      (send [:a 2])
-      (receive) => {:a [1 2] :b [1]}
+      (send-receive [:a 2]) => {:a [1 2] :b [1]}
 
-      (send [:a 3])
-      (receive) => {:a [1 2 3] :b [1]})))
+      (send-receive [:a 3]) => {:a [1 2 3] :b [1]})))
+
+(comment
+  (facts "about time-based leasing"
+    (facts "multiset"
+      (test-node ::core/multiset
+        (t/seconds 2)
+        false
+
+        (send 1)
+        (receive) => (ms/multiset 1)
+
+        (Thread/sleep 1000)
+
+        (send 2)
+        (receive) => (ms/multiset 1 2)
+
+        (Thread/sleep 1100)
+
+        (send 3)
+        (receive) => (ms/multiset 2 3)
+
+        (Thread/sleep 3000)
+
+        (send 4)
+        (receive) => (ms/multiset 4)))
+    (facts "hash")))
+
+(comment
+  (facts "about buffered source nodes"
+    (facts "multiset")
+    (facts "hash")))
 
 (comment
   (facts "about leasing"

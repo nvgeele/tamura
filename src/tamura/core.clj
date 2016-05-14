@@ -121,6 +121,12 @@
   [hash key val]
   (make-hash (assoc (:hash hash) key val)))
 
+(core/defn hash-update
+  [hash key f]
+  (-> (:hash hash)
+      (update key f)
+      (make-hash)))
+
 (core/defn hash-remove
   [hash key]
   (make-hash (dissoc (:hash hash) key)))
@@ -315,7 +321,7 @@
 ;; TODO: use this in all nodes
 (defmacro send-subscribers
   [subscribers changed? value id]
-  `(doseq [sub# @~subscribers]
+  `(doseq [sub# ~subscribers]
      (>! sub# {:changed? ~changed? :value ~value :from ~id})))
 
 (defmacro subscriber-loop
@@ -337,11 +343,10 @@
   `(do (core/defn ~constructor-name ~args ~@body)
        (register-constructor! ~type ~constructor-name)))
 
-;; TODO: implement leasing in the source nodes
-;; TODO: priority queue for leasing
-;; TODO: timeout must be a period (e.g. t/minutes)
+;; NOTE: timeout must be a period (e.g. t/minutes)
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
+
 (core/defn make-source-node
   [id [return-type & {:keys [timeout] :or {timeout false}}] []]
   (let [in (chan)]
@@ -355,31 +360,11 @@
         (recur (<! in) (cons subscriber subs) pm value)
 
         {:destination id :value new-value}
-        (let [now (t/now)
-              cutoff (when timeout (t/minus now timeout))
-              new-coll (if (= return-type ::multiset)
+        (let [new-coll (if (= return-type ::multiset)
                          (multiset-insert value new-value)
-                         (hash-insert value (first new-value) (second new-value)))
-              new-pm (when timeout
-                       (assoc pm (if (hash? new-coll) (first new-value) new-value) now))
-              [new-coll new-pm]
-              (if timeout
-                (loop [pm new-pm
-                       coll new-coll]
-                  (let [[v t] (peek pm)]
-                    (if (t/before? t cutoff)
-                      (let [coll (if (= return-type ::multiset)
-                                   (multiset-remove coll v)
-                                   (hash-remove coll v))
-                            pm (pop pm)]
-                        (recur pm coll))
-                      [coll pm])))
-                [new-coll nil])]
-          (doseq [sub subs]
-            (>! sub {:changed? true
-                     :value    new-coll
-                     :origin   id}))
-          (recur (<! in) subs new-pm new-coll))
+                         (hash-update value (first new-value) #(conj (if % % []) (second new-value))))]
+          (send-subscribers subs true new-coll id)
+          (recur (<! in) subs pm new-coll))
 
         {:destination _}
         (do (doseq [sub subs]
@@ -391,6 +376,56 @@
         ;; TODO: error?
         :else (recur (<! in) subs pm value)))
     (Source. id ::source return-type in in)))
+(comment
+  (core/defn make-source-node
+    [id [return-type & {:keys [timeout] :or {timeout false}}] []]
+    (let [in (chan)]
+      (go-loop [msg (<! in)
+                subs []
+                pm (pm/priority-map)
+                value (if (= return-type ::multiset) (make-multiset) (make-hash))]
+        (log/debug (str "source " id " has received: " (seq msg)))
+        (match msg
+          {:subscribe subscriber}
+          (recur (<! in) (cons subscriber subs) pm value)
+
+          {:destination id :value new-value}
+          (let [now (t/now)
+                cutoff (when timeout (t/minus now timeout))
+                new-coll (if (= return-type ::multiset)
+                           (multiset-insert value new-value)
+                           (hash-insert value (first new-value) (second new-value)))
+                new-pm (when timeout
+                         (assoc pm (if (hash? new-coll) (first new-value) new-value) now))
+                [new-coll new-pm]
+                (if timeout
+                  (loop [pm new-pm
+                         coll new-coll]
+                    (let [[v t] (peek pm)]
+                      (if (t/before? t cutoff)
+                        (let [coll (if (= return-type ::multiset)
+                                     (multiset-remove coll v)
+                                     (hash-remove coll v))
+                              pm (pop pm)]
+                          (recur pm coll))
+                        [coll pm])))
+                  [new-coll nil])]
+            (doseq [sub subs]
+              (>! sub {:changed? true
+                       :value    new-coll
+                       :origin   id}))
+            (recur (<! in) subs new-pm new-coll))
+
+          {:destination _}
+          (do (doseq [sub subs]
+                (>! sub {:changed? false
+                         :value    value
+                         :origin   id}))
+              (recur (<! in) subs pm value))
+
+          ;; TODO: error?
+          :else (recur (<! in) subs pm value)))
+      (Source. id ::source return-type in in))))
 (register-constructor! ::source make-source-node)
 
 ;; input nodes = the actual node records
@@ -503,25 +538,6 @@
 
 ;; TODO: put in docstring that it emits empty hash or set
 ;; TODO: make sure it still works with leasing
-
-;; TODO: define similar semantics for buffers
-(comment
-  "Semantics delay, multiset, after leasing/buffer"
-  #{}         => #{}
-  #{1}        => #{}
-  #{1 2}      => #{1}
-  #{1 2 3}    => #{1 2}
-  #{2 3 4}    => #{2 3}
-  #{2 3 4 5}  => #{2 3 4}
-
-  "Semantics delay, hash, after leasing/buffer"
-  {}                => {}
-  {:a 1}            => {}
-  {:a 1 :b 1}       => {}
-  {:a 2 :b 1}       => {:a 1}
-  {:a 2 :b 2}       => {:a 1 :b 1}
-  {:b 2 :c 1}       => {:b 1}
-  {:b 2 :c 1 :a 3}  => {:b 1})
 
 (core/defn make-delay-node
   [id [] [input-node]]
@@ -678,23 +694,6 @@
     (Node. id ::throttle (:return-type input-node) sub-chan)))
 (register-constructor! ::throttle make-throttle-node)
 
-(comment
-  "Semantics buffer of size 2, multiset, after leasing/buffer"
-  #{}         => #{}
-  #{1}        => #{1}
-  #{1 2}      => #{1 2}
-  #{1 2 3}    => #{2 3}
-  #{4}        => #{4}
-  #{4 5}      => #{4 5}
-
-  "Semantics buffer of size 2, hash, after leasing/buffer"
-  {}                => {}
-  {:a 1}            => {:a 1}
-  {:a 1 :b 1}       => {:a 1 :b 1}
-  {:a 1 :b 1 :c 1}  => {:b 1 :c 1}
-  {:d 1}            => {:d 1}
-  {:d 1 :e 1}       => {:d 1 :e 1})
-
 ;; TODO: deal with removals in chained buffers and so on (also, leasing)
 (core/defn make-buffer-node
   [id [size] [input-node]]
@@ -728,7 +727,7 @@
                   ;; NOTE: use (.indexOf buffer-list new-key) instead?
                   (.remove buffer-list new-key)
                   (.addFirst buffer-list new-key)
-                  (send-subscribers subscribers true buffer id)
+                  (send-subscribers @subscribers true buffer id)
                   (recur (<! input) (:value msg) buffer-list buffer))
                 (let [buffer (-> (or buffer (make-hash))
                                  (#(if (= (count buffer-list) size)
@@ -736,7 +735,7 @@
                                     %))
                                  (hash-insert new-key (second new-element)))]
                   (.addFirst buffer-list new-key)
-                  (send-subscribers subscribers true buffer id)
+                  (send-subscribers @subscribers true buffer id)
                   (recur (<! input) (:value msg) buffer-list buffer))))
 
             (:changed? msg)
@@ -755,9 +754,9 @@
               (if new-element
                 (do (.addFirst buffer-list new-element)
                     (let [buffer (make-multiset (apply ms/multiset buffer-list))]
-                      (send-subscribers subscribers true buffer id)
+                      (send-subscribers @subscribers true buffer id)
                       (recur (<! input) (:multiset (:value msg)) buffer-list buffer)))
-                (do (send-subscribers subscribers true buffer id)
+                (do (send-subscribers @subscribers true buffer id)
                     (recur (<! input) (:multiset (make-multiset)) buffer-list buffer))))
 
             :else
@@ -905,6 +904,79 @@
 (defmacro print-signal
   [signal]
   `(do-apply #(locking *out* (println (quote ~signal) ": " %)) ~signal))
+
+(comment
+  "Semantics map-to-hash -- multiset"
+
+  "Hash")
+
+(comment
+  "Semantics map-to-multiset -- multiset"
+
+  "Hash")
+
+(comment
+  "Semantics do-apply -- multiset"
+
+  "Hash")
+
+(comment
+  "Semantics filter -- multiset"
+
+  "Hash")
+
+(comment
+  "Semantics zip -- multiset"
+
+  "Hash")
+
+(comment
+  "Semantics multiplicities -- multiset"
+
+  "Hash")
+
+(comment
+  "Semantics reduce -- multiset"
+
+  "Hash")
+
+(comment
+  "Semantics delay, multiset, after leasing/buffer"
+  #{}         => #{}
+  #{1}        => #{}
+  #{1 2}      => #{1}
+  #{1 2 3}    => #{1 2}
+  #{2 3 4}    => #{2 3}
+  #{2 3 4 5}  => #{2 3 4}
+
+  "Semantics delay, hash, after leasing/buffer"
+  {}                     => {}
+  {:a [1]}               => {}
+  {:a [1] :b [1]}        => {}
+  {:a [2] :b [1]}        => {:a [1]}
+  {:a [2] :b [2]}        => {:a [1] :b [1]}
+  {:b [2] :c [1]}        => {:b [1]}
+  {:b [2] :c [1] :a [3]} => {:b [1]})
+
+;; TODO: operation to restrict number of keys?
+(comment
+  "Semantics buffer of size 2, multiset, after leasing/buffer"
+  #{}         => #{}
+  #{1}        => #{1}
+  #{1 2}      => #{1 2}
+  #{1 2 3}    => #{2 3}
+  #{4}        => #{4}
+  #{4 5}      => #{4 5}
+
+  "Semantics buffer of size 2, hash, after leasing/buffer"
+  {}                     => {}
+  {:a [1]}               => {:a [1]}
+  {:a [1] :b [1]}        => {:a [1] :b [1]}
+  {:a [1] :b [1] :c [1]} => {:b [1] :c [1]}
+  {:d [1]}               => {:d [1]}
+  {:d [1] :e [1]}        => {:d [1] :e [1]})
+
+;; TODO: filter specific for hash (filter-keys? and filter-values)?
 
 (core/defn -main
   [& args]
