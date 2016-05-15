@@ -266,33 +266,45 @@
 ;; TODO: send internal hash and multiset from above data structures
 (core/defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
-  (let [in (chan)]
+  (let [in (chan)
+        transformer (if (= return-type :multiset)
+                      #(make-multiset (to-multiset %))
+                      #(make-hash (to-hash %)))]
     (go-loop [msg (<! in)
               subs []
-              pm (pm/priority-map)
-              buffer-list (LinkedList.)
-              value (if (= return-type :multiset) (make-multiset) (make-hash))]
+              value (cond (and buffer timeout)
+                          (if (= return-type :multiset)
+                            (make-timed-multiset timeout (make-buffered-multiset buffer))
+                            (make-timed-hash timeout (make-buffered-hash buffer)))
+                          buffer
+                          (if (= return-type :multiset)
+                            (make-buffered-multiset buffer)
+                            (make-buffered-hash buffer))
+                          timeout
+                          (if (= return-type :multiset)
+                            (make-timed-multiset timeout)
+                            (make-timed-hash timeout))
+                          :else
+                          (if (= return-type :multiset) (make-multiset) (make-hash)))]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
         {:subscribe subscriber}
-        (recur (<! in) (cons subscriber subs) pm buffer-list value)
+        (recur (<! in) (cons subscriber subs) value)
 
         {:destination id :value new-value}
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))]
-          (send-subscribers subs true new-coll id)
-          (recur (<! in) subs pm buffer-list new-coll))
+          (send-subscribers subs true (transformer new-coll) id)
+          (recur (<! in) subs new-coll))
 
+        ;; TODO: memoize transformer
         {:destination _}
-        (do (doseq [sub subs]
-              (>! sub {:changed? false
-                       :value    value
-                       :origin   id}))
-            (recur (<! in) subs pm buffer-list value))
+        (do (send-subscribers subs false (transformer value) id)
+            (recur (<! in) subs value))
 
         ;; TODO: error?
-        :else (recur (<! in) subs pm buffer-list value)))
+        :else (recur (<! in) subs value)))
     (Source. id ::source return-type in in)))
 (register-constructor! ::source make-source-node)
 
@@ -433,14 +445,15 @@
                 (>! sub {:changed? true :value delayed :from id}))
               (recur (<! input) (:value msg) delayed))
 
+            ;; NOTE: added the nil's because of the refactoring
             (:changed? msg)
             (let [delayed (or delayed (make-multiset))
-                  added (multiset-minus (:value msg) delayed)
-                  removed (multiset-minus delayed (:value msg))
-                  delayed (if removed (multiset-minus delayed removed) delayed)]
+                  added (multiset-minus nil (:value msg) delayed)
+                  removed (multiset-minus nil delayed (:value msg))
+                  delayed (if removed (multiset-minus nil delayed removed) delayed)]
               (doseq [sub @subscribers]
                 (>! sub {:changed? true :value delayed :from id}))
-              (recur (<! input) nil (multiset-union delayed added)))
+              (recur (<! input) nil (multiset-union nil delayed added)))
 
             :else
             (do (doseq [sub @subscribers]

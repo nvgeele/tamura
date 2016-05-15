@@ -191,8 +191,8 @@
   ([timeout hash] (TimedHash. hash timeout (pm/priority-map))))
 
 (defn make-multiset
-  []
-  (RegularMultiSet. (ms/multiset)))
+  ([] (make-multiset (ms/multiset)))
+  ([ms] (RegularMultiSet. ms)))
 (defn make-buffered-multiset
   ([size]
    (make-buffered-multiset size (make-multiset)))
