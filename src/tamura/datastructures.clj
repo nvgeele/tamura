@@ -118,17 +118,19 @@
     (to-hash hash)))
 
 ;; TODO: to-multiset
-(defprotocol MultiSet
+(defprotocol MultiSetBasic
   (multiset-insert [this val])
   (multiset-remove [this val])
-  (to-multiset [this])
+  (to-multiset [this]))
 
+(defprotocol MultiSet
   (multiset-contains? [this val])
   (multiset-minus [this l r])
-  (multiset-union [this l r]))
+  (multiset-union [this l r])
+  (multiset-multiplicities [this]))
 
 (deftype RegularMultiSet [ms]
-  MultiSet
+  MultiSetBasic
   (multiset-insert [this val]
     (RegularMultiSet. (conj ms val)))
   (multiset-remove [this val]
@@ -136,6 +138,7 @@
   (to-multiset [this]
     ms)
 
+  MultiSet
   (multiset-contains? [this val]
     (contains? ms val))
   (multiset-minus [this l r]
@@ -143,10 +146,12 @@
         (RegularMultiSet.)))
   (multiset-union [this l r]
     (-> (ms/union (.ms l) (.ms r))
-        (RegularMultiSet.))))
+        (RegularMultiSet.)))
+  (multiset-multiplicities [this]
+    (ms/multiplicities ms)))
 
 (deftype BufferedMultiSet [ms size buffer-list]
-  MultiSet
+  MultiSetBasic
   (multiset-insert [this val]
     (let [new-ms (if (= (count buffer-list) size)
                    (let [rel (.removeLast buffer-list)]
@@ -158,14 +163,10 @@
     (-> (multiset-remove ms val)
         (BufferedMultiSet. size buffer-list)))
   (to-multiset [this]
-    (to-multiset ms))
-
-  (multiset-contains? [this val])
-  (multiset-minus [this l r])
-  (multiset-union [this l r]))
+    (to-multiset ms)))
 
 (deftype TimedMultiSet [ms timeout pm]
-  MultiSet
+  MultiSetBasic
   (multiset-insert [this val]
     (let [now (t/now)
           cutoff (t/minus now timeout)
@@ -185,11 +186,7 @@
           new-pm (filter (fn [[v t]] (not (= v val))) pm)]
       (TimedMultiSet. new-ms timeout new-pm)))
   (to-multiset [this]
-    (to-multiset ms))
-
-  (multiset-contains? [this val])
-  (multiset-minus [this l r])
-  (multiset-union [this l r]))
+    (to-multiset ms)))
 
 (defn make-hash
   ([] (make-hash {}))
