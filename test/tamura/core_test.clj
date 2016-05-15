@@ -147,53 +147,6 @@
 
 (comment
   (facts "about leasing"
-    (facts "about leasing multiset source nodes"
-      (test-node :multiset
-        (t/seconds 2)
-        false
-
-        (send 1)
-        (receive) => (ms/multiset 1)
-
-        (Thread/sleep 1000)
-
-        (send 2)
-        (receive) => (ms/multiset 1 2)
-
-        (Thread/sleep 1100)
-
-        (send 3)
-        (receive) => (ms/multiset 2 3)
-
-        (Thread/sleep 3000)
-
-        (send 4)
-        (receive) => (ms/multiset 4)))
-    (facts "about leasing hash source nodes"
-      (test-node :hash
-        (t/seconds 2)
-        false
-
-        (send [:a 1])
-        (receive) => {:a 1}
-
-        (Thread/sleep 1000)
-
-        (send [:b 1])
-        (receive) => {:a 1 :b 1}
-
-        (send [:a 2])
-        (receive) => {:a 2 :b 1}
-
-        (Thread/sleep 1100)
-
-        (send [:c 1])
-        (receive) => {:a 2 :b 1 :c 1}
-
-        (Thread/sleep 3000)
-
-        (send [:a 1])
-        (receive) => {:a 1}))
     (facts "about delay after leased hash source node"
       (test-node :hash
         (t/seconds 2)
