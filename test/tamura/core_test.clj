@@ -108,18 +108,24 @@
       (send-receive :a 2) => {:a [1 2] :b [1] :c [1]}
       (send-receive :a 3) => {:a [2 3] :b [1] :c [1]})))
 
-(comment
-  (facts "about time-based leasing"
-    (facts "multiset"
-      (test-node :multiset (t/seconds 2) false false
-        (send-receive 1) => (ms/multiset 1)
-        (Thread/sleep 1000)
-        (send-receive 2) => (ms/multiset 1 2)
-        (Thread/sleep 1100)
-        (send-receive 3) => (ms/multiset 2 3)
-        (Thread/sleep 3000)
-        (send-receive 4) => (ms/multiset 4)))
-    (facts "hash")))
+(facts "about time-based leasing"
+  (facts "multiset"
+    (test-node :multiset (t/seconds 2) false false
+      (send-receive 1) => (ms/multiset 1)
+      (Thread/sleep 1000)
+      (send-receive 2) => (ms/multiset 1 2)
+      (Thread/sleep 1100)
+      (send-receive 3) => (ms/multiset 2 3)
+      (Thread/sleep 3000)
+      (send-receive 4) => (ms/multiset 4)))
+  (facts "hash"
+    (test-node :hash (t/seconds 2) false false
+      (send-receive :a 1) => {:a [1]}
+      (send-receive :a 2) => {:a [1 2]}
+      (Thread/sleep 1000)
+      (send-receive :a 3) => {:a [1 2 3]}
+      (Thread/sleep 1100)
+      (send-receive :b 1) => {:a [3] :b [1]})))
 
 (comment
   (facts "about leasing"
