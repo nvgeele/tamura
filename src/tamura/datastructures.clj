@@ -1,7 +1,8 @@
 (ns tamura.datastructures
   (:require [clojure.data.priority-map :as pm]
             [multiset.core :as ms]
-            [clj-time.core :as t]))
+            [clj-time.core :as t])
+  (:import [java.util LinkedList]))
 
 ;; TODO: leasing operations in datastructures?
 ;; TODO: tests for all datastructures
@@ -116,38 +117,79 @@
   (to-hash [h]
     (to-hash hash)))
 
-(comment
+;; TODO: to-multiset
+(defprotocol MultiSet
+  (multiset-insert [this val])
+  (multiset-remove [this val])
+  (to-multiset [this])
 
-  (defprotocol MultiSet
-    (multiset-insert [ms val])
-    (multiset-contains? [ms val])
-    (multiset-remove [ms val])
-    (multiset-minus [ms l r])
-    (multiset-union [ms l r]))
+  (multiset-contains? [this val])
+  (multiset-minus [this l r])
+  (multiset-union [this l r]))
 
-  (deftype RegularMultiSet [ms]
-    MultiSet
-    (multiset-insert [ms val])
-    (multiset-contains? [ms val])
-    (multiset-remove [ms val])
-    (multiset-minus [ms l r])
-    (multiset-union [ms l r]))
+(deftype RegularMultiSet [ms]
+  MultiSet
+  (multiset-insert [this val]
+    (RegularMultiSet. (conj ms val)))
+  (multiset-remove [this val]
+    (RegularMultiSet. (disj ms val)))
+  (to-multiset [this]
+    ms)
 
-  (deftype BufferedMultiSet [ms size]
-    MultiSet
-    (multiset-insert [ms val])
-    (multiset-contains? [ms val])
-    (multiset-remove [ms val])
-    (multiset-minus [ms l r])
-    (multiset-union [ms l r]))
+  (multiset-contains? [this val]
+    (contains? ms val))
+  (multiset-minus [this l r]
+    (-> (ms/minus (.ms l) (.ms r))
+        (RegularMultiSet.)))
+  (multiset-union [this l r]
+    (-> (ms/union (.ms l) (.ms r))
+        (RegularMultiSet.))))
 
-  (deftype TimedMultiSet [ms timeout]
-    MultiSet
-    (multiset-insert [ms val])
-    (multiset-contains? [ms val])
-    (multiset-remove [ms val])
-    (multiset-minus [ms l r])
-    (multiset-union [ms l r])))
+(deftype BufferedMultiSet [ms size buffer-list]
+  MultiSet
+  (multiset-insert [this val]
+    (let [new-ms (if (= (count buffer-list) size)
+                   (let [rel (.removeLast buffer-list)]
+                     (multiset-insert (multiset-remove ms rel) val))
+                   (multiset-insert ms val))]
+      (.addFirst buffer-list val)
+      (BufferedMultiSet. new-ms size buffer-list)))
+  (multiset-remove [this val]
+    (-> (multiset-remove ms val)
+        (BufferedMultiSet. size buffer-list)))
+  (to-multiset [this]
+    (to-multiset ms))
+
+  (multiset-contains? [this val])
+  (multiset-minus [this l r])
+  (multiset-union [this l r]))
+
+(deftype TimedMultiSet [ms timeout pm]
+  MultiSet
+  (multiset-insert [this val]
+    (let [now (t/now)
+          cutoff (t/minus now timeout)
+          [new-ms new-pm]
+          (loop [pm (assoc pm val now)
+                 ms ms]
+            (let [[v t] (peek pm)]
+              (if (t/before? t cutoff)
+                (let [ms (multiset-remove ms v)
+                      pm (pop pm)]
+                  (recur pm ms))
+                [ms pm])))]
+      (-> (multiset-insert new-ms val)
+          (TimedMultiSet. timeout new-pm))))
+  (multiset-remove [this val]
+    (let [new-ms (multiset-remove ms val)
+          new-pm (filter (fn [[v t]] (not (= v val))) pm)]
+      (TimedMultiSet. new-ms timeout new-pm)))
+  (to-multiset [this]
+    (to-multiset ms))
+
+  (multiset-contains? [this val])
+  (multiset-minus [this l r])
+  (multiset-union [this l r]))
 
 (defn make-hash
   ([] (make-hash {}))
@@ -159,12 +201,25 @@
   ([timeout] (make-timed-hash timeout (make-hash)))
   ([timeout hash] (TimedHash. hash timeout (pm/priority-map))))
 
-;(defn make-multiset [])
-;(defn make-buffered-multiset [])
-;(defn make-timed-multiset [])
+(defn make-multiset
+  []
+  (RegularMultiSet. (ms/multiset)))
+(defn make-buffered-multiset
+  ([size]
+   (make-buffered-multiset size (make-multiset)))
+  ([size ms]
+   (BufferedMultiSet. ms size (LinkedList.))))
+(defn make-timed-multiset
+  ([timeout]
+    (make-timed-multiset timeout (make-multiset)))
+  ([timeout ms]
+   (TimedMultiSet. ms timeout (pm/priority-map))))
 
 (defn test-print [v]
   (println (to-hash v))
+  v)
+(defn test-print2 [v]
+  (println (to-multiset v))
   v)
 
 (comment
@@ -199,7 +254,28 @@
     (test-print a)
     (test-print b)
     (def c (hash-insert b :b 1))
-    (test-print c)))
+    (test-print c))
+  (defn ttt []
+    (-> (make-buffered-multiset 3)
+        (multiset-insert 1)
+        (multiset-insert 2)
+        test-print2
+        (multiset-insert 3)
+        (multiset-insert 4)
+        test-print2
+        (multiset-insert 5)
+        (to-multiset)))
+  (defn ttt []
+    (def a (-> (make-timed-multiset (t/seconds 2))
+               (multiset-insert 1)
+               (multiset-insert 2)))
+    (Thread/sleep 1000)
+    (def b (multiset-insert a 3))
+    (Thread/sleep 1100)
+    (test-print2 a)
+    (test-print2 b)
+    (def c (multiset-insert b 4))
+    (test-print2 c)))
 
 (comment
   (declare insert)
