@@ -828,6 +828,29 @@
   - 5 seconds wait -
   [:a 5] => {:a [4 5]})
 
+(comment "Semantics delay, after non-leased/buffered source"
+  "multiset"
+
+  "hash")
+
+(comment "Semantics delay, after leasing/buffer (in this case buffer with size 2)"
+  "multiset"
+  #{}         => #{}
+  #{1}        => #{}
+  #{1 2}      => #{1}
+  #{1 2 3}    => #{1 2}
+  #{2 3 4}    => #{2 3}
+  #{2 3 4 5}  => #{2 3 4}
+
+  "buffer"
+  {}                     => {}
+  {:a [1]}               => {}
+  {:a [1] :b [1]}        => {}
+  {:a [2] :b [1]}        => {:a [1]}
+  {:a [2] :b [2]}        => {:a [1] :b [1]}
+  {:b [2] :c [1]}        => {:b [1]}
+  {:b [2] :c [1] :a [3]} => {:b [1]})
+
 (comment "Semantics buffer (size 3)"
   "multiset"
 
@@ -877,24 +900,6 @@
   "hash")
 
 ;; TODO: something special for hashes called previous?
-
-(comment
-  "Semantics delay, multiset, after leasing/buffer"
-  #{}         => #{}
-  #{1}        => #{}
-  #{1 2}      => #{1}
-  #{1 2 3}    => #{1 2}
-  #{2 3 4}    => #{2 3}
-  #{2 3 4 5}  => #{2 3 4}
-
-  "Semantics delay, hash, after leasing/buffer"
-  {}                     => {}
-  {:a [1]}               => {}
-  {:a [1] :b [1]}        => {}
-  {:a [2] :b [1]}        => {:a [1]}
-  {:a [2] :b [2]}        => {:a [1] :b [1]}
-  {:b [2] :c [1]}        => {:b [1]}
-  {:b [2] :c [1] :a [3]} => {:b [1]})
 
 ;; TODO: operation to restrict number of keys?
 (comment
