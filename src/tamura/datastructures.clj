@@ -1,116 +1,337 @@
 (ns tamura.datastructures
   (:require [clojure.data.priority-map :as pm]
-            [multiset.core :as ms]))
+            [multiset.core :as ms]
+            [clj-time.core :as t]))
 
 ;; TODO: leasing operations in datastructures?
 ;; TODO: tests for all datastructures
 
+;; TODO: hash-get-latest
+(defprotocol Hash
+  (hash-insert [h key val])
+  (hash-get [h key])
+  (hash-contains? [h key])
+  (hash-update [h key f])
+  (hash-remove [h key])
+  (hash-remove-element [h key val])
+  (hash-remove-first [h key])
+  (hash->set [h])
+  (to-hash [h]))
+
+(deftype RegularHash [hash]
+  Hash
+  (hash-update [h key f]
+    (-> (update hash key f)
+        (RegularHash.)))
+  (hash-insert [h key val]
+    (hash-update h key #(conj (if % % []) val)))
+  (hash-get [h key]
+    (get hash key))
+  (hash-contains? [h key]
+    (contains? hash key))
+  (hash-remove [h key]
+    (-> (dissoc hash key)
+        (RegularHash.)))
+  (hash-remove-element [h key val]
+    (let [items (get hash key)
+          new-items (remove #{val} items)]
+      (RegularHash. (assoc hash key (vec new-items)))))
+  (hash-remove-first [h key]
+    (hash-update h key #(vec (rest %))))
+  (hash->set [h]
+    (set hash))
+  (to-hash [h]
+    hash))
+
+;; NOTE: must either contain TimedHash or RegularHash
+(deftype BufferedHash [hash size]
+  Hash
+  (hash-insert [h key val]
+    (let [current (hash-get hash key)
+          new-hash (if (or (empty? current) (< (count current) size))
+                     (hash-insert hash key val)
+                     (-> (hash-remove-first hash key)
+                         (hash-insert key val)))]
+      (BufferedHash. new-hash size)))
+  (hash-get [h key]
+    (hash-get hash key))
+  (hash-contains? [h key]
+    (hash-contains? hash key))
+  (hash-update [h key f]
+    (-> (hash-update hash key f)
+        (BufferedHash. size)))
+  (hash-remove [h key]
+    (-> (hash-remove hash key)
+        (BufferedHash. size)))
+  (hash-remove-element [h key val]
+    (-> (hash-remove-element hash key val)
+        (BufferedHash. size)))
+  (hash-remove-first [h key]
+    (-> (hash-remove-first hash key)
+        (BufferedHash. size)))
+  (hash->set [h]
+    (hash->set hash))
+  (to-hash [h]
+    (to-hash hash)))
+
+;; NOTE: must either contain BufferedHash or RegularHash
+(deftype TimedHash [hash timeout pm]
+  Hash
+  (hash-insert [h key val]
+    (let [now (t/now)
+          cutoff (t/minus now timeout)
+          [new-hash new-pm]
+          (loop [pm (assoc pm [key val] now)
+                 hash hash]
+            (let [[[k v] t] (peek pm)]
+              (if (t/before? t cutoff)
+                (let [hash (hash-remove-element hash k v)
+                      pm (pop pm)]
+                  (recur pm hash))
+                [hash pm])))]
+      (-> (hash-insert new-hash key val)
+          (TimedHash. timeout new-pm))))
+  (hash-get [h key]
+    (hash-get hash key))
+  (hash-contains? [h key]
+    (hash-contains? hash key))
+  (hash-update [h key f]
+    (-> (hash-update hash key f)
+        (TimedHash. timeout pm)))
+  (hash-remove [h key]
+    (let [hash (hash-remove hash key)
+          pm (filter (fn [[[k v] t]] (not (= k key))) pm)]
+      (TimedHash. hash timeout pm)))
+  (hash-remove-element [h key val]
+    (let [hash (hash-remove hash key)
+          pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
+      (TimedHash. hash timeout pm)))
+  (hash-remove-first [h key]
+    (let [val (first (hash-get hash key))
+          hash (hash-remove-first hash key)
+          pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
+      (TimedHash. hash timeout pm)))
+  (hash->set [h]
+    (set hash))
+  (to-hash [h]
+    (to-hash hash)))
+
+(comment
+
+  (defprotocol MultiSet
+    (multiset-insert [ms val])
+    (multiset-contains? [ms val])
+    (multiset-remove [ms val])
+    (multiset-minus [ms l r])
+    (multiset-union [ms l r]))
+
+  (deftype RegularMultiSet [ms]
+    MultiSet
+    (multiset-insert [ms val])
+    (multiset-contains? [ms val])
+    (multiset-remove [ms val])
+    (multiset-minus [ms l r])
+    (multiset-union [ms l r]))
+
+  (deftype BufferedMultiSet [ms size]
+    MultiSet
+    (multiset-insert [ms val])
+    (multiset-contains? [ms val])
+    (multiset-remove [ms val])
+    (multiset-minus [ms l r])
+    (multiset-union [ms l r]))
+
+  (deftype TimedMultiSet [ms timeout]
+    MultiSet
+    (multiset-insert [ms val])
+    (multiset-contains? [ms val])
+    (multiset-remove [ms val])
+    (multiset-minus [ms l r])
+    (multiset-union [ms l r])))
+
 (defn make-hash
-  ([]
-   (make-hash {}))
-  ([hash]
-   {:type :hash :hash hash}))
+  ([] (make-hash {}))
+  ([hash] (RegularHash. hash)))
+(defn make-buffered-hash
+  ([size] (make-buffered-hash size (make-hash)))
+  ([size hash] (BufferedHash. hash size)))
+(defn make-timed-hash
+  ([timeout] (make-timed-hash timeout (make-hash)))
+  ([timeout hash] (TimedHash. hash timeout (pm/priority-map))))
 
-(defn hash?
-  [x]
-  (= (:type x) :hash))
+;(defn make-multiset [])
+;(defn make-buffered-multiset [])
+;(defn make-timed-multiset [])
 
-(defn hash-contains?
-  [hash key]
-  (let [hash (:hash hash)]
-    (contains? hash key)))
+(defn test-print [v]
+  (println (to-hash v))
+  v)
 
-(defn hash-get
-  [hash key]
-  (let [hash (:hash hash)]
-    (get hash key)))
+(comment
+  (defn ttt []
+    (-> (make-hash)
+        (hash-insert :a 1)
+        (hash-insert :b 1)
+        (hash-insert :a 2)
+        (hash-insert :a 3)
+        (hash-insert :c 1)
+        (test-print)
+        (hash-remove-first :a)
+        (test-print)
+        (hash-remove :b)
+        (test-print)
+        (hash->set)))
+  (defn ttt []
+    (-> (make-buffered-hash 2)
+        (hash-insert :a 1)
+        (hash-insert :b 1)
+        (hash-insert :a 2)
+        (test-print)
+        (hash-insert :a 3)
+        (test-print)))
+  (defn ttt []
+    (def a (-> (make-timed-hash (t/seconds 2))
+               (hash-insert :a 1)
+               (hash-insert :a 2)))
+    (Thread/sleep 1000)
+    (def b (hash-insert a :a 3))
+    (Thread/sleep 1100)
+    (test-print a)
+    (test-print b)
+    (def c (hash-insert b :b 1))
+    (test-print c)))
 
-(defn hash-keys
-  [hash]
-  (let [hash (:hash hash)]
-    (keys hash)))
+(comment
+  (declare insert)
 
-(defn hash-insert
-  [hash key val]
-  (make-hash (assoc (:hash hash) key val)))
+  (defn make-hash
+    ([]
+     (make-hash {}))
+    ([hash]
+     {:type :hash :hash hash}))
 
-(defn hash-update
-  [hash key f]
-  (-> (:hash hash)
-      (update key f)
-      (make-hash)))
+  (defn hash?
+    [x]
+    (= (:type x) :hash))
 
-(defn hash-remove
-  [hash key]
-  (make-hash (dissoc (:hash hash) key)))
+  (defn hash-contains?
+    [hash key]
+    (let [hash (:hash hash)]
+      (contains? hash key)))
 
-(defn hash->set
-  [hash]
-  (set (:hash hash)))
+  (defn hash-get
+    [hash key]
+    (let [hash (:hash hash)]
+      (get hash key)))
 
-(defn make-buffered-hash)
+  (defn hash-keys
+    [hash]
+    (let [hash (:hash hash)]
+      (keys hash)))
 
-(defn buffere-hash-insert)
+  (defn hash-insert
+    [hash key val]
+    (-> (:hash hash)
+        (update key #(conj (if % % []) val))
+        (make-hash)))
 
-(defn buffered-hash-get)
+  (defn hash-update
+    [hash key f]
+    (-> (:hash hash)
+        (update key f)
+        (make-hash)))
 
-(defn make-timed-hash)
+  (defn hash-remove
+    [hash key]
+    (make-hash (dissoc (:hash hash) key)))
 
-(defn timed-hash-insert)
+  (defn hash->set
+    [hash]
+    (set (:hash hash)))
 
-(defn timed-hash-get)
+  ;; TODO: error on incorrect sizes
+  (defn make-buffered-hash
+    ([size] (make-buffered-hash size (make-hash)))
+    ([size h] {:type :buffered-hash :hash h :size size}))
 
-(defn make-multiset
-  ([]
-   (make-multiset (ms/multiset)))
-  ([multiset]
-   {:type :multiset :multiset multiset}))
+  (defn buffered-hash-insert
+    [h k v]
+    (let [hash (:hash h)
+          current (hash-get hash k)]
+      (if (or (empty? current) (< (count current) (:size h)))
+        (assoc h :hash (hash-insert hash k v))
+        (assoc h :hash (hash-update hash k #(conj (vec (rest %)) v))))))
 
-(defn multiset?
-  [x]
-  (= (:type x) :multiset))
+  (defn ttt
+    []
+    (-> (make-buffered-hash 2)
+        (insert :a 1)
+        (insert :b 1)
+        (insert :a 2)
+        (insert :a 3)))
 
-(defn multiset-contains?
-  [ms val]
-  (contains? (:multiset ms) val))
+  (defn buffered-hash-get
+    [h key]
+    (-> (:hash h)
+        (hash-get key)))
 
-(defn multiset-multiplicities
-  [ms]
-  (ms/multiplicities (:multiset ms)))
+  (defn make-timed-hash
+    ([time] (make-timed-hash time (make-hash)))
+    ([time h] {:type :buffered-hash :hash h :time time}))
 
-(defn multiset-insert
-  [ms val]
-  (-> (:multiset ms)
-      (conj val)
-      (make-multiset)))
+  (defn timed-hash-insert
+    [])
 
-(defn multiset-remove
-  [ms val]
-  (-> (:multiset ms)
-      (disj val)
-      (make-multiset)))
+  (defn timed-hash-get
+    [])
 
-(defn multiset-minus
-  [l r]
-  (-> (ms/minus (:multiset l) (:multiset r))
-      (make-multiset)))
+  (defn make-multiset
+    ([]
+     (make-multiset (ms/multiset)))
+    ([multiset]
+     {:type :multiset :multiset multiset}))
 
-(defn multiset-union
-  [l r]
-  (-> (ms/union (:multiset l) (:multiset r))
-      (make-multiset)))
+  (defn multiset?
+    [x]
+    (= (:type x) :multiset))
 
-(defn make-buffered-multiset)
+  (defn multiset-contains?
+    [ms val]
+    (contains? (:multiset ms) val))
 
-(defn buffered-multiset-insert)
+  (defn multiset-multiplicities
+    [ms]
+    (ms/multiplicities (:multiset ms)))
 
-(defn buffered-multiset-get)
+  (defn multiset-insert
+    [ms val]
+    (-> (:multiset ms)
+        (conj val)
+        (make-multiset)))
 
-(defn make-timed-multiset)
+  (defn multiset-remove
+    [ms val]
+    (-> (:multiset ms)
+        (disj val)
+        (make-multiset)))
 
-(defn timed-multiset-insert)
+  (defn multiset-minus
+    [l r]
+    (-> (ms/minus (:multiset l) (:multiset r))
+        (make-multiset)))
 
-(defn timed-multiset-get)
+  (defn multiset-union
+    [l r]
+    (-> (ms/union (:multiset l) (:multiset r))
+        (make-multiset)))
+
+  (defn make-buffered-multiset [])
+
+  (defn buffered-multiset-insert [])
+
+  (defn make-timed-multiset [])
+
+  (defn timed-multiset-insert []))
 
 (defn insert
   ([ds val]
