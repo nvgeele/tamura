@@ -1,5 +1,6 @@
 (ns tamura.core-test
-  (:use midje.sweet)
+  (:use midje.sweet
+        tamura.datastructures)
   (:require [tamura.core :as core]
             [clojure.core.async :as a :refer [>!! <!!]]
             [multiset.core :as ms]
@@ -46,11 +47,11 @@
 
 (defn receive-hash
   []
-  (:hash (:value (<!! *test-chan*))))
+  (to-hash (:value (<!! *test-chan*))))
 
 (defn receive-multiset
   []
-  (:multiset (:value (<!! *test-chan*))))
+  (to-multiset (:value (<!! *test-chan*))))
 
 (defn receive
   []

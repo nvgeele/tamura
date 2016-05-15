@@ -7,28 +7,26 @@
 ;; TODO: tests for all datastructures
 
 ;; TODO: hash-get-latest
-(defprotocol Hash
-  (hash-insert [h key val])
+(defprotocol HashBasic
   (hash-get [h key])
-  (hash-contains? [h key])
-  (hash-update [h key f])
+  (hash-insert [h key val])
   (hash-remove [h key])
   (hash-remove-element [h key val])
   (hash-remove-first [h key])
-  (hash->set [h])
   (to-hash [h]))
 
+(defprotocol Hash
+  (hash-update [h key f])
+  (hash-contains? [h key])
+  (hash-keys [this])
+  (hash->set [h]))
+
 (deftype RegularHash [hash]
-  Hash
-  (hash-update [h key f]
-    (-> (update hash key f)
-        (RegularHash.)))
-  (hash-insert [h key val]
-    (hash-update h key #(conj (if % % []) val)))
+  HashBasic
   (hash-get [h key]
     (get hash key))
-  (hash-contains? [h key]
-    (contains? hash key))
+  (hash-insert [h key val]
+    (hash-update h key #(conj (if % % []) val)))
   (hash-remove [h key]
     (-> (dissoc hash key)
         (RegularHash.)))
@@ -38,14 +36,25 @@
       (RegularHash. (assoc hash key (vec new-items)))))
   (hash-remove-first [h key]
     (hash-update h key #(vec (rest %))))
+  (to-hash [h]
+    hash)
+
+  Hash
+  (hash-contains? [h key]
+    (contains? hash key))
+  (hash-update [h key f]
+    (-> (update hash key f)
+        (RegularHash.)))
   (hash->set [h]
     (set hash))
-  (to-hash [h]
-    hash))
+  (hash-keys [this]
+    (keys hash)))
 
 ;; NOTE: must either contain TimedHash or RegularHash
 (deftype BufferedHash [hash size]
-  Hash
+  HashBasic
+  (hash-get [h key]
+    (hash-get hash key))
   (hash-insert [h key val]
     (let [current (hash-get hash key)
           new-hash (if (or (empty? current) (< (count current) size))
@@ -53,13 +62,6 @@
                      (-> (hash-remove-first hash key)
                          (hash-insert key val)))]
       (BufferedHash. new-hash size)))
-  (hash-get [h key]
-    (hash-get hash key))
-  (hash-contains? [h key]
-    (hash-contains? hash key))
-  (hash-update [h key f]
-    (-> (hash-update hash key f)
-        (BufferedHash. size)))
   (hash-remove [h key]
     (-> (hash-remove hash key)
         (BufferedHash. size)))
@@ -69,14 +71,14 @@
   (hash-remove-first [h key]
     (-> (hash-remove-first hash key)
         (BufferedHash. size)))
-  (hash->set [h]
-    (hash->set hash))
   (to-hash [h]
     (to-hash hash)))
 
 ;; NOTE: must either contain BufferedHash or RegularHash
 (deftype TimedHash [hash timeout pm]
-  Hash
+  HashBasic
+  (hash-get [h key]
+    (hash-get hash key))
   (hash-insert [h key val]
     (let [now (t/now)
           cutoff (t/minus now timeout)
@@ -91,13 +93,6 @@
                 [hash pm])))]
       (-> (hash-insert new-hash key val)
           (TimedHash. timeout new-pm))))
-  (hash-get [h key]
-    (hash-get hash key))
-  (hash-contains? [h key]
-    (hash-contains? hash key))
-  (hash-update [h key f]
-    (-> (hash-update hash key f)
-        (TimedHash. timeout pm)))
   (hash-remove [h key]
     (let [hash (hash-remove hash key)
           pm (filter (fn [[[k v] t]] (not (= k key))) pm)]
@@ -111,8 +106,6 @@
           hash (hash-remove-first hash key)
           pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
       (TimedHash. hash timeout pm)))
-  (hash->set [h]
-    (set hash))
   (to-hash [h]
     (to-hash hash)))
 
