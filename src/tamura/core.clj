@@ -262,6 +262,8 @@
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
 
+;; TODO: use buffered and timed datastructures
+;; TODO: send internal hash and multiset from above data structures
 (core/defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
   (let [in (chan)]
@@ -278,7 +280,7 @@
         {:destination id :value new-value}
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
-                         (hash-update value (first new-value) #(conj (if % % []) (second new-value))))]
+                         (hash-insert value (first new-value) (second new-value)))]
           (send-subscribers subs true new-coll id)
           (recur (<! in) subs pm buffer-list new-coll))
 
@@ -292,56 +294,6 @@
         ;; TODO: error?
         :else (recur (<! in) subs pm buffer-list value)))
     (Source. id ::source return-type in in)))
-(comment
-  (core/defn make-source-node
-    [id [return-type & {:keys [timeout] :or {timeout false}}] []]
-    (let [in (chan)]
-      (go-loop [msg (<! in)
-                subs []
-                pm (pm/priority-map)
-                value (if (= return-type :multiset) (make-multiset) (make-hash))]
-        (log/debug (str "source " id " has received: " (seq msg)))
-        (match msg
-          {:subscribe subscriber}
-          (recur (<! in) (cons subscriber subs) pm value)
-
-          {:destination id :value new-value}
-          (let [now (t/now)
-                cutoff (when timeout (t/minus now timeout))
-                new-coll (if (= return-type :multiset)
-                           (multiset-insert value new-value)
-                           (hash-insert value (first new-value) (second new-value)))
-                new-pm (when timeout
-                         (assoc pm (if (hash? new-coll) (first new-value) new-value) now))
-                [new-coll new-pm]
-                (if timeout
-                  (loop [pm new-pm
-                         coll new-coll]
-                    (let [[v t] (peek pm)]
-                      (if (t/before? t cutoff)
-                        (let [coll (if (= return-type :multiset)
-                                     (multiset-remove coll v)
-                                     (hash-remove coll v))
-                              pm (pop pm)]
-                          (recur pm coll))
-                        [coll pm])))
-                  [new-coll nil])]
-            (doseq [sub subs]
-              (>! sub {:changed? true
-                       :value    new-coll
-                       :origin   id}))
-            (recur (<! in) subs new-pm new-coll))
-
-          {:destination _}
-          (do (doseq [sub subs]
-                (>! sub {:changed? false
-                         :value    value
-                         :origin   id}))
-              (recur (<! in) subs pm value))
-
-          ;; TODO: error?
-          :else (recur (<! in) subs pm value)))
-      (Source. id ::source return-type in in))))
 (register-constructor! ::source make-source-node)
 
 ;; input nodes = the actual node records
