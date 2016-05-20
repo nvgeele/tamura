@@ -16,6 +16,8 @@
   (multiset-contains? [this val])
   (multiset-minus [this l r])
   (multiset-union [this l r])
+
+  ;; TODO: return dictionary?
   (multiset-multiplicities [this]))
 
 (deftype RegularMultiSet [ms]
@@ -49,8 +51,11 @@
       (.addFirst buffer-list val)
       (BufferedMultiSet. new-ms size buffer-list)))
   (multiset-remove [this val]
-    (-> (multiset-remove ms val)
-        (BufferedMultiSet. size buffer-list)))
+    (if (multiset-contains? ms val)
+      (-> (multiset-remove ms val)
+          (BufferedMultiSet. size (do (.removeLastOccurrence buffer-list val)
+                                      buffer-list)))
+      this))
   (to-multiset [this]
     (to-multiset ms)))
 
