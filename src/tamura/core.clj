@@ -268,14 +268,14 @@
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
   (let [in (chan)
         transformer (if (= return-type :multiset)
-                      #(make-multiset (to-multiset %))
-                      #(make-hash (to-hash %)))]
+                      #(to-regular-multiset %)
+                      #(to-regular-hash %))]
     (go-loop [msg (<! in)
               subs []
               value (cond (and buffer timeout)
                           (if (= return-type :multiset)
                             (make-timed-multiset timeout (make-buffered-multiset buffer))
-                            (make-timed-hash timeout (make-buffered-hash buffer)))
+                            (make-timed-buffered-hash timeout buffer))
                           buffer
                           (if (= return-type :multiset)
                             (make-buffered-multiset buffer)
@@ -295,6 +295,7 @@
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))]
+          (println value)
           (send-subscribers subs true (transformer new-coll) id)
           (recur (<! in) subs new-coll))
 
@@ -830,8 +831,15 @@
 
 (comment "Semantics delay, after non-leased/buffered source"
   "multiset"
+  #{}      => #{}
+  #{1}     => #{}
+  #{1 2}   => #{1}
+  #{1 2 3} => #{1 2}
 
-  "hash")
+  "hash"
+  {:a [1]}          => {}
+  {:a [1] :b [1]}   => {:a [1]}
+  {:a [1 2] :b [1]} => {:a [1] :b [1]})
 
 (comment "Semantics delay, after leasing/buffer (in this case buffer with size 2)"
   "multiset"
@@ -889,6 +897,7 @@
 
   "hash")
 
+;; TODO: return hash instead of ?
 (comment "Semantics multiplicities"
   "multiset"
 

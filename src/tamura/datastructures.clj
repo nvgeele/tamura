@@ -10,7 +10,8 @@
 (defprotocol MultiSetBasic
   (multiset-insert [this val])
   (multiset-remove [this val])
-  (to-multiset [this]))
+  (to-multiset [this])
+  (to-regular-multiset [this]))
 
 (defprotocol MultiSet
   (multiset-contains? [this val])
@@ -28,6 +29,8 @@
     (RegularMultiSet. (disj ms val)))
   (to-multiset [this]
     ms)
+  (to-regular-multiset [this]
+    this)
 
   MultiSet
   (multiset-contains? [this val]
@@ -57,7 +60,9 @@
                                       buffer-list)))
       this))
   (to-multiset [this]
-    (to-multiset ms)))
+    (to-multiset ms))
+  (to-regular-multiset [this]
+    (to-regular-multiset ms)))
 
 (deftype TimedMultiSet [ms timeout pm]
   MultiSetBasic
@@ -80,7 +85,9 @@
           new-pm (filter (fn [[v t]] (not (= v val))) pm)]
       (TimedMultiSet. new-ms timeout new-pm)))
   (to-multiset [this]
-    (to-multiset ms)))
+    (to-multiset ms))
+  (to-regular-multiset [this]
+    (to-regular-multiset ms)))
 
 (defn make-multiset
   ([] (make-multiset (ms/multiset)))
@@ -102,7 +109,8 @@
   (hash-insert [h key val])
   (hash-remove [h key])
   (hash-remove-element [h key val])
-  (to-hash [h]))
+  (to-hash [h])
+  (to-regular-hash [h]))
 
 (defprotocol Hash
   (hash-update [h key f])
@@ -125,6 +133,8 @@
       (HashImpl. init (assoc hash key new-items))))
   (to-hash [h]
     (reduce-kv #(assoc %1 %2 (to-multiset %3)) {} hash))
+  (to-regular-hash [h]
+    (HashImpl. make-multiset (reduce-kv #(assoc %1 %2 (to-regular-multiset %3)) {} hash)))
 
   Hash
   (hash-contains? [h key]
