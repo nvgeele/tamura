@@ -76,7 +76,21 @@
       (do-op d/hash-insert :b 3) => {:a (ms/multiset 2 3) :b (ms/multiset 2 3)}))
   (facts "about timed hashes"
     (test-with (d/make-timed-hash (t/seconds 2))
-      ))
+      (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)}
+      (Thread/sleep 1000)
+      (do-op d/hash-insert :a 2) => {:a (ms/multiset 1 2)}
+      (Thread/sleep 1100)
+      (do-op d/hash-insert :a 3) => {:a (ms/multiset 2 3)}
+      (Thread/sleep 3000)
+      (do-op d/hash-insert :a 4) => {:a (ms/multiset 4)}))
   (facts "about buffered & timed hashes"
     (test-with (d/make-timed-buffered-hash (t/seconds 2) 2)
-      )))
+      (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)}
+      (do-op d/hash-insert :a 2) => {:a (ms/multiset 1 2)}
+      (do-op d/hash-insert :a 3) => {:a (ms/multiset 2 3)}
+      (Thread/sleep 1000)
+      (do-op d/hash-insert :a 4) => {:a (ms/multiset 3 4)}
+      (Thread/sleep 1100)
+      (do-op d/hash-insert :a 5) => {:a (ms/multiset 4 5)}
+      (Thread/sleep 2100)
+      (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)})))
