@@ -4,13 +4,16 @@
             [clj-time.core :as t])
   (:import [java.util LinkedList]))
 
-;; TODO: tests for all datastructures
+;; TODO: tests for multiset-inserted and multiset-removed
+;; TODO: tests for hash-inserted and hash-removed
 
 ;; TODO: to-multiset
 (defprotocol MultiSetBasic
   (multiset-insert [this val])
   (multiset-remove [this val])
   (multiset-empty? [this])
+  (multiset-inserted [this])
+  (multiset-removed [this])
   (to-multiset [this])
   (to-regular-multiset [this]))
 
@@ -30,6 +33,10 @@
     (RegularMultiSet. (disj ms val)))
   (multiset-empty? [this]
     (empty? ms))
+  (multiset-inserted [this]
+    [])
+  (multiset-removed [this]
+    [])
   (to-multiset [this]
     ms)
   (to-regular-multiset [this]
@@ -64,6 +71,10 @@
       this))
   (multiset-empty? [this]
     (multiset-empty? ms))
+  (multiset-inserted [this]
+    [])
+  (multiset-removed [this]
+    [])
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
@@ -91,6 +102,10 @@
       (TimedMultiSet. new-ms timeout new-pm)))
   (multiset-empty? [this]
     (multiset-empty? ms))
+  (multiset-inserted [this]
+    [])
+  (multiset-removed [this]
+    [])
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
@@ -116,6 +131,8 @@
   (hash-insert [h key val])
   (hash-remove [h key])
   (hash-remove-element [h key val])
+  (hash-removed [this])
+  (hash-inserted [this])
   (to-hash [h])
   (to-regular-hash [h]))
 
@@ -125,32 +142,38 @@
   (hash-keys [this])
   (hash->set [h]))
 
-(deftype HashImpl [init hash]
+(deftype HashImpl [hash init removed inserted]
   HashBasic
   (hash-get [h key]
     (get hash key))
   (hash-insert [h key val]
     (hash-update h key #(multiset-insert (if % % (init)) val)))
   (hash-remove [h key]
-    (->> (dissoc hash key)
-         (HashImpl. init)))
+    (-> (dissoc hash key)
+        (HashImpl. init removed inserted)))
   (hash-remove-element [h key val]
     (let [items (get hash key (init))
           new-items (multiset-remove items val)]
-      (HashImpl. init (if (multiset-empty? new-items)
-                        (dissoc hash key)
-                        (assoc hash key new-items)))))
+      (HashImpl. (if (multiset-empty? new-items)
+                   (dissoc hash key)
+                   (assoc hash key new-items))
+                 init removed inserted)))
+  (hash-removed [this]
+    [])
+  (hash-inserted [this]
+    [])
   (to-hash [h]
     (reduce-kv #(assoc %1 %2 (to-multiset %3)) {} hash))
   (to-regular-hash [h]
-    (HashImpl. make-multiset (reduce-kv #(assoc %1 %2 (to-regular-multiset %3)) {} hash)))
+    (HashImpl. (reduce-kv #(assoc %1 %2 (to-regular-multiset %3)) {} hash)
+               make-multiset removed inserted))
 
   Hash
   (hash-contains? [h key]
     (contains? hash key))
   (hash-update [h key f]
-    (->> (update hash key f)
-         (HashImpl. init)))
+    (-> (update hash key f)
+        (HashImpl. init removed inserted)))
   (hash->set [h]
     (set (to-hash h)))
   (hash-keys [this]
@@ -184,6 +207,10 @@
     (let [hash (hash-remove-element hash key val)
           pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
       (TimedHash. hash timeout pm)))
+  (hash-removed [this]
+    [])
+  (hash-inserted [this]
+    [])
   (to-hash [h]
     ;; TODO: perform expirations
     (to-hash hash))
@@ -204,10 +231,10 @@
 
 (defn make-hash
   ([] (make-hash {}))
-  ([hash] (HashImpl. make-multiset hash)))
+  ([hash] (HashImpl. hash make-multiset [] [])))
 (defn make-buffered-hash
   ([size] (make-buffered-hash size {}))
-  ([size hash] (HashImpl. #(make-buffered-multiset size) hash)))
+  ([size hash] (HashImpl. hash #(make-buffered-multiset size) [] [])))
 (defn make-timed-hash
   [timeout]
   (TimedHash. (make-hash) timeout (pm/priority-map)))
