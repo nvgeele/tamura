@@ -84,7 +84,8 @@
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
-    (to-regular-multiset ms)))
+    (let [ms (to-multiset ms)]
+      (RegularMultiSet. ms inserted removed))))
 
 (deftype TimedMultiSet [ms timeout pm inserted removed]
   MultiSetBasic
@@ -117,7 +118,8 @@
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
-    (to-regular-multiset ms)))
+    (let [ms (to-multiset ms)]
+      (RegularMultiSet. ms inserted removed))))
 
 (defn make-multiset
   ([] (make-multiset (ms/multiset)))
@@ -142,8 +144,8 @@
   (hash-insert [h key val])
   (hash-remove [h key])
   (hash-remove-element [h key val])
-  (hash-removed [this])
   (hash-inserted [this])
+  (hash-removed [this])
   (to-hash [h])
   (to-regular-hash [h]))
 
@@ -153,26 +155,29 @@
   (hash-keys [this])
   (hash->set [h]))
 
-(deftype HashImpl [hash init removed inserted]
+(deftype HashImpl [hash init inserted removed]
   HashBasic
   (hash-get [h key]
     (get hash key))
   (hash-insert [h key val]
+    ;; TODO: inserted + removed
     (hash-update h key #(multiset-insert (if % % (init)) val)))
   (hash-remove [h key]
+    ;; TODO: removed
     (-> (dissoc hash key)
         (HashImpl. init removed inserted)))
   (hash-remove-element [h key val]
+    ;; TODO: removed
     (let [items (get hash key (init))
           new-items (multiset-remove items val)]
       (HashImpl. (if (multiset-empty? new-items)
                    (dissoc hash key)
                    (assoc hash key new-items))
                  init removed inserted)))
-  (hash-removed [this]
-    [])
   (hash-inserted [this]
-    [])
+    inserted)
+  (hash-removed [this]
+    removed)
   (to-hash [h]
     (reduce-kv #(assoc %1 %2 (to-multiset %3)) {} hash))
   (to-regular-hash [h]
@@ -218,9 +223,9 @@
     (let [hash (hash-remove-element hash key val)
           pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
       (TimedHash. hash timeout pm)))
-  (hash-removed [this]
-    [])
   (hash-inserted [this]
+    [])
+  (hash-removed [this]
     [])
   (to-hash [h]
     ;; TODO: perform expirations
