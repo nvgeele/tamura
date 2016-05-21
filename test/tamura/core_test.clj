@@ -79,34 +79,32 @@
 ;; TODO: tests for data structures?
 ;; TODO: change tests so they use the whole static build system thingy
 
-;; TODO: send-receive hybrid
-(comment
-  (facts "about simple sources"
-    (facts "multiset"
-      (test-multiset-node false
-        (send-receive 1) => (ms/multiset 1)
-        (send-receive 2) => (ms/multiset 1 2)
-        (send-receive 3) => (ms/multiset 1 2 3)))
-    (facts "hash"
-      (test-hash-node false
-        (send-receive :a 1) => {:a (ms/multiset 1)}
-        (send-receive :b 1) => {:a (ms/multiset 1) :b (ms/multiset 1)}
-        (send-receive :a 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1)}
-        (send-receive :a 3) => {:a (ms/multiset 1 2 3) :b (ms/multiset 1)})))
+(facts "about simple sources"
+  (facts "multiset"
+    (test-multiset-node false
+      (send-receive 1) => (ms/multiset 1)
+      (send-receive 2) => (ms/multiset 1 2)
+      (send-receive 3) => (ms/multiset 1 2 3)))
+  (facts "hash"
+    (test-hash-node false
+      (send-receive :a 1) => {:a (ms/multiset 1)}
+      (send-receive :b 1) => {:a (ms/multiset 1) :b (ms/multiset 1)}
+      (send-receive :a 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1)}
+      (send-receive :a 3) => {:a (ms/multiset 1 2 3) :b (ms/multiset 1)})))
 
-  (facts "about buffered source nodes"
-    (facts "multiset"
-      (test-node :multiset false false 2
-        (send-receive 1) => (ms/multiset 1)
-        (send-receive 2) => (ms/multiset 1 2)
-        (send-receive 3) => (ms/multiset 2 3)))
-    (facts "hash"
-      (test-node :hash false false 2
-        (send-receive :a 1) => {:a (ms/multiset 1)}
-        (send-receive :b 1) => {:a (ms/multiset 1) :b (ms/multiset 1)}
-        (send-receive :c 1) => {:a (ms/multiset 1) :b (ms/multiset 1) :c (ms/multiset 1)}
-        (send-receive :a 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1) :c (ms/multiset 1)}
-        (send-receive :a 3) => {:a (ms/multiset 2 3) :b (ms/multiset 1) :c (ms/multiset 1)}))))
+(facts "about buffered source nodes"
+  (facts "multiset"
+    (test-node :multiset false false 2
+      (send-receive 1) => (ms/multiset 1)
+      (send-receive 2) => (ms/multiset 1 2)
+      (send-receive 3) => (ms/multiset 2 3)))
+  (facts "hash"
+    (test-node :hash false false 2
+      (send-receive :a 1) => {:a (ms/multiset 1)}
+      (send-receive :b 1) => {:a (ms/multiset 1) :b (ms/multiset 1)}
+      (send-receive :c 1) => {:a (ms/multiset 1) :b (ms/multiset 1) :c (ms/multiset 1)}
+      (send-receive :a 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1) :c (ms/multiset 1)}
+      (send-receive :a 3) => {:a (ms/multiset 2 3) :b (ms/multiset 1) :c (ms/multiset 1)})))
 
 (facts "about time-based leasing"
   (facts "multiset"
@@ -126,24 +124,24 @@
       (send-receive :a 3) => {:a (ms/multiset 1 2 3)}
       (Thread/sleep 1100)
       (send-receive :b 1) => {:a (ms/multiset 3) :b (ms/multiset 1)})))
-(comment
-  (facts "about time-based, buffered leasing"
-    (facts "multiset"
-      (test-node :multiset (t/seconds 2) false 2
-        (send-receive 1) => (ms/multiset 1)
-        (send-receive 2) => (ms/multiset 1 2)
-        (Thread/sleep 1000)
-        (send-receive 3) => (ms/multiset 2 3)
-        (Thread/sleep 1100)
-        (send-receive 4) => (ms/multiset 3 4)))
-    (facts "hash"
-      (test-node :hash (t/seconds 2) false 2
-        (send-receive :a 1) => {:a (ms/multiset 1)}
-        (send-receive :a 2) => {:a (ms/multiset 1 2)}
-        (Thread/sleep 1000)
-        (send-receive :a 3) => {:a (ms/multiset 2 3)}
-        (Thread/sleep 1100)
-        (send-receive :b 1) => {:a (ms/multiset 3) :b (ms/multiset 1)}))))
+
+(facts "about time-based, buffered leasing"
+  (facts "multiset"
+    (test-node :multiset (t/seconds 2) false 2
+      (send-receive 1) => (ms/multiset 1)
+      (send-receive 2) => (ms/multiset 1 2)
+      (Thread/sleep 1000)
+      (send-receive 3) => (ms/multiset 2 3)
+      (Thread/sleep 1100)
+      (send-receive 4) => (ms/multiset 3 4)))
+  (facts "hash"
+    (test-node :hash (t/seconds 2) false 2
+      (send-receive :a 1) => {:a (ms/multiset 1)}
+      (send-receive :a 2) => {:a (ms/multiset 1 2)}
+      (Thread/sleep 1000)
+      (send-receive :a 3) => {:a (ms/multiset 2 3)}
+      (Thread/sleep 1100)
+      (send-receive :b 1) => {:a (ms/multiset 3) :b (ms/multiset 1)})))
 
 (comment
   (facts "about leasing"

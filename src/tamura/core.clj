@@ -295,7 +295,6 @@
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))]
-          (println value)
           (send-subscribers subs true (transformer new-coll) id)
           (recur (<! in) subs new-coll))
 
