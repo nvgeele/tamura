@@ -547,7 +547,77 @@
     (Node. id ::throttle (:return-type input-node) sub-chan)))
 (register-constructor! ::throttle make-throttle-node)
 
+(comment "Semantics buffer (size 2)"
+  "multiset"
+  #{1}       => #{1}
+  #{1 2}     => #{1 2}
+  #{1 2 3}   => #{2 3}
+  #{1 2 3 4} => #{3 4}
+
+  "hash"
+  {:a #{1}}       => {:a #{1}}
+  {:a #{1 2}}     => {:a #{1 2}}
+  {:a #{1 2 3}}   => {:a #{2 3}}
+  {:a #{1 2 3 4}} => {:a #{3 4}})
+
+(comment
+  "Semantics buffer of size 2, multiset, after leasing/buffer"
+  #{1}        => #{1}
+  #{1 2}      => #{1 2}
+  #{1 2 3}    => #{2 3}
+  - timeout -
+  #{4}        => #{4}
+  #{4 5}      => #{4 5}
+
+  "Semantics buffer of size 3, multiset, after buffered source of size 2"
+  #{1}   => #{1}
+  #{1 2} => #{1 2}
+  #{2 3} => #{2 3}
+  #{3 4} => #{3 4}
+
+  "Semantics buffer of size 2, hash, after leasing/buffer"
+  {:a #{1}}             => {:a #{1}}
+  {:a #{1 2}}           => {:a #{1 2}}
+  {:a #{1 2 3}}         => {:a #{2 3}}
+  {:a #{1 2 3} :b #{1}} => {:a #{2 3} :b #{1}}
+  - timeout -
+  {:d #{1}}             => {:d #{1}}
+  {:d #{1} :e #{1}}     => {:d #{1} :e #{1}})
+
 ;; TODO: deal with removals in chained buffers and so on (also, leasing)
+
+(comment
+  (let [new-set (hash->set (:value msg))
+        previous-set (hash->set previous)
+        new-element (first (cs/difference new-set previous-set))
+        new-key (first new-element)
+        previous-keys (set (hash-keys previous))
+        new-keys (set (hash-keys (:value msg)))
+        removed-keys (cs/difference previous-keys new-keys)
+        buffer (if (empty? removed-keys)
+                 buffer
+                 (reduce (fn [buffer key]
+                           (.remove buffer-list key)
+                           (hash-remove buffer key))
+                         buffer
+                         removed-keys))]
+    (if (hash-contains? buffer new-key)
+      (let [buffer (hash-insert buffer new-key (second new-element))]
+        ;; NOTE: use (.indexOf buffer-list new-key) instead?
+        (.remove buffer-list new-key)
+        (.addFirst buffer-list new-key)
+        (send-subscribers @subscribers true buffer id)
+        (recur (<! input) (:value msg) buffer-list buffer))
+      (let [buffer (-> (or buffer (make-hash))
+                       (#(if (= (count buffer-list) size)
+                          (hash-remove % (.removeLast buffer-list))
+                          %))
+                       (hash-insert new-key (second new-element)))]
+        (.addFirst buffer-list new-key)
+        (send-subscribers @subscribers true buffer id)
+        (recur (<! input) (:value msg) buffer-list buffer)))))
+
+;; TODO: WE WILL ALWAYS NEED TO DETECT REMOVALS
 (core/defn make-buffer-node
   [id [size] [input-node]]
   (let [sub-chan (chan)
@@ -558,63 +628,35 @@
     (go-loop [msg (<! input)
               previous nil
               buffer-list (LinkedList.)
-              buffer nil]
+              buffer (if hash? (make-hash) (make-multiset))]
       (log/debug (str "buffer-node " id " has received: " msg))
       (cond (and (:changed? msg) hash?)
-            (let [new-set (hash->set (:value msg))
-                  previous-set (hash->set previous)
-                  new-element (first (cs/difference new-set previous-set))
-                  new-key  (first new-element)
-                  previous-keys (set (hash-keys previous))
-                  new-keys (set (hash-keys (:value msg)))
-                  removed-keys (cs/difference previous-keys new-keys)
-                  buffer (if (empty? removed-keys)
-                           buffer
-                           (reduce (fn [buffer key]
-                                     (.remove buffer-list key)
-                                     (hash-remove buffer key))
-                                   buffer
-                                   removed-keys))]
-              (if (hash-contains? buffer new-key)
-                (let [buffer (hash-insert buffer new-key (second new-element))]
-                  ;; NOTE: use (.indexOf buffer-list new-key) instead?
-                  (.remove buffer-list new-key)
-                  (.addFirst buffer-list new-key)
-                  (send-subscribers @subscribers true buffer id)
-                  (recur (<! input) (:value msg) buffer-list buffer))
-                (let [buffer (-> (or buffer (make-hash))
-                                 (#(if (= (count buffer-list) size)
-                                    (hash-remove % (.removeLast buffer-list))
-                                    %))
-                                 (hash-insert new-key (second new-element)))]
-                  (.addFirst buffer-list new-key)
-                  (send-subscribers @subscribers true buffer id)
-                  (recur (<! input) (:value msg) buffer-list buffer))))
+            ;; TODO
+            nil
 
             (:changed? msg)
-            (let [new-element (if previous
-                                (first (ms/minus (:multiset (:value msg)) previous))
-                                (first (:multiset (:value msg))))
+            (let [new-element (first (to-multiset
+                                       (if previous
+                                         (multiset-minus (:value msg) previous)
+                                         (:value msg))))
                   removed (if previous
-                            (ms/minus previous (:multiset (:value msg)))
-                            (ms/multiset))]
-              (when-not (empty? removed)
-                (doseq [el removed]
+                            (multiset-minus previous (:value msg))
+                            (make-multiset))]
+              (when-not (multiset-empty? removed)
+                (doseq [el (to-multiset removed)]
                   (.remove buffer-list el)))
               (when (= (count buffer-list) size)
                 (.removeLast buffer-list))
-              ;; TODO: more efficient, thus without the apply thing
               (if new-element
                 (do (.addFirst buffer-list new-element)
                     (let [buffer (make-multiset (apply ms/multiset buffer-list))]
                       (send-subscribers @subscribers true buffer id)
-                      (recur (<! input) (:multiset (:value msg)) buffer-list buffer)))
+                      (recur (<! input) (:value msg) buffer-list buffer)))
                 (do (send-subscribers @subscribers true buffer id)
-                    (recur (<! input) (:multiset (make-multiset)) buffer-list buffer))))
+                    (recur (<! input) (:value msg) buffer-list buffer))))
 
             :else
-            (do (doseq [sub @subscribers]
-                  (>! sub {:changed? false :value buffer :from id}))
+            (do (send-subscribers @subscribers false buffer id)
                 (recur (<! input) previous buffer-list buffer))))
     (Node. id ::buffer (:return-type input-node) sub-chan)))
 (register-constructor! ::buffer make-buffer-node)
