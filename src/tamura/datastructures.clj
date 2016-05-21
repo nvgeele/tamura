@@ -10,6 +10,7 @@
 (defprotocol MultiSetBasic
   (multiset-insert [this val])
   (multiset-remove [this val])
+  (multiset-empty? [this])
   (to-multiset [this])
   (to-regular-multiset [this]))
 
@@ -27,6 +28,8 @@
     (RegularMultiSet. (conj ms val)))
   (multiset-remove [this val]
     (RegularMultiSet. (disj ms val)))
+  (multiset-empty? [this]
+    (empty? ms))
   (to-multiset [this]
     ms)
   (to-regular-multiset [this]
@@ -59,6 +62,8 @@
           (BufferedMultiSet. size (do (.removeLastOccurrence buffer-list val)
                                       buffer-list)))
       this))
+  (multiset-empty? [this]
+    (multiset-empty? ms))
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
@@ -84,6 +89,8 @@
     (let [new-ms (multiset-remove ms val)
           new-pm (filter (fn [[v t]] (not (= v val))) pm)]
       (TimedMultiSet. new-ms timeout new-pm)))
+  (multiset-empty? [this]
+    (multiset-empty? ms))
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
@@ -130,7 +137,7 @@
   (hash-remove-element [h key val]
     (let [items (get hash key (init))
           new-items (multiset-remove items val)]
-      (HashImpl. init (if (empty? new-items)
+      (HashImpl. init (if (multiset-empty? new-items)
                         (dissoc hash key)
                         (assoc hash key new-items)))))
   (to-hash [h]
