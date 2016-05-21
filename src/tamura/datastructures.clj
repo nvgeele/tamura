@@ -25,18 +25,20 @@
   ;; TODO: return dictionary?
   (multiset-multiplicities [this]))
 
-(deftype RegularMultiSet [ms]
+(deftype RegularMultiSet [ms inserted removed]
   MultiSetBasic
   (multiset-insert [this val]
-    (RegularMultiSet. (conj ms val)))
+    (RegularMultiSet. (conj ms val) [val] []))
   (multiset-remove [this val]
-    (RegularMultiSet. (disj ms val)))
+    (if (contains? ms val)
+      (RegularMultiSet. (disj ms val) [] [val])
+      (RegularMultiSet. ms [] [])))
   (multiset-empty? [this]
     (empty? ms))
   (multiset-inserted [this]
-    [])
+    inserted)
   (multiset-removed [this]
-    [])
+    removed)
   (to-multiset [this]
     ms)
   (to-regular-multiset [this]
@@ -47,65 +49,71 @@
     (contains? ms val))
   (multiset-minus [this r]
     (-> (ms/minus (.ms this) (.ms r))
-        (RegularMultiSet.)))
+        (RegularMultiSet. [] [])))
   (multiset-union [this r]
     (-> (ms/union (.ms this) (.ms r))
-        (RegularMultiSet.)))
+        (RegularMultiSet. [] [])))
   (multiset-multiplicities [this]
     (ms/multiplicities ms)))
 
-(deftype BufferedMultiSet [ms size buffer-list]
+;; TODO: make copies of linked list or use clojure implementation
+(deftype BufferedMultiSet [ms size buffer-list inserted removed]
   MultiSetBasic
   (multiset-insert [this val]
-    (let [new-ms (if (= (count buffer-list) size)
-                   (let [rel (.removeLast buffer-list)]
-                     (multiset-insert (multiset-remove ms rel) val))
-                   (multiset-insert ms val))]
-      (.addFirst buffer-list val)
-      (BufferedMultiSet. new-ms size buffer-list)))
+    (if (= (count buffer-list) size)
+      (let [rel (.removeLast buffer-list)
+            msr (multiset-remove ms rel)
+            msa (multiset-insert msr val)]
+        (.addFirst buffer-list val)
+        (BufferedMultiSet. msa size buffer-list (multiset-inserted msa) (multiset-removed msr)))
+      (let [ms (multiset-insert ms val)]
+        (.addFirst buffer-list val)
+        (BufferedMultiSet. ms size buffer-list (multiset-inserted ms) (multiset-removed ms)))))
   (multiset-remove [this val]
     (if (multiset-contains? ms val)
-      (-> (multiset-remove ms val)
-          (BufferedMultiSet. size (do (.removeLastOccurrence buffer-list val)
-                                      buffer-list)))
-      this))
+      (let [ms (multiset-remove ms val)]
+        (.removeLastOccurrence buffer-list val)
+        (BufferedMultiSet. ms size buffer-list [] (multiset-removed ms)))
+      (BufferedMultiSet. ms size buffer-list [] [])))
   (multiset-empty? [this]
     (multiset-empty? ms))
   (multiset-inserted [this]
-    [])
+    inserted)
   (multiset-removed [this]
-    [])
+    removed)
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
     (to-regular-multiset ms)))
 
-(deftype TimedMultiSet [ms timeout pm]
+(deftype TimedMultiSet [ms timeout pm inserted removed]
   MultiSetBasic
   (multiset-insert [this val]
     (let [now (t/now)
           cutoff (t/minus now timeout)
-          [new-ms new-pm]
+          [new-ms new-pm removed]
           (loop [pm (assoc pm val now)
-                 ms ms]
+                 ms ms
+                 removed []]
             (let [[v t] (peek pm)]
               (if (t/before? t cutoff)
                 (let [ms (multiset-remove ms v)
                       pm (pop pm)]
-                  (recur pm ms))
-                [ms pm])))]
-      (-> (multiset-insert new-ms val)
-          (TimedMultiSet. timeout new-pm))))
+                  (recur pm ms (concat removed (multiset-removed ms))))
+                [ms pm removed])))
+          ms (multiset-insert new-ms val)
+          removed (concat removed (multiset-removed ms))]
+      (TimedMultiSet. ms timeout new-pm [val] removed)))
   (multiset-remove [this val]
     (let [new-ms (multiset-remove ms val)
           new-pm (filter (fn [[v t]] (not (= v val))) pm)]
-      (TimedMultiSet. new-ms timeout new-pm)))
+      (TimedMultiSet. new-ms timeout new-pm [] (multiset-removed new-ms))))
   (multiset-empty? [this]
     (multiset-empty? ms))
   (multiset-inserted [this]
-    [])
+    inserted)
   (multiset-removed [this]
-    [])
+    removed)
   (to-multiset [this]
     (to-multiset ms))
   (to-regular-multiset [this]
@@ -113,17 +121,20 @@
 
 (defn make-multiset
   ([] (make-multiset (ms/multiset)))
-  ([ms] (RegularMultiSet. ms)))
+  ([ms] (RegularMultiSet. ms [] [])))
 (defn make-buffered-multiset
   ([size]
    (make-buffered-multiset size (make-multiset)))
   ([size ms]
-   (BufferedMultiSet. ms size (LinkedList.))))
+   (BufferedMultiSet. ms size (LinkedList.) [] [])))
 (defn make-timed-multiset
   ([timeout]
    (make-timed-multiset timeout (make-multiset)))
   ([timeout ms]
-   (TimedMultiSet. ms timeout (pm/priority-map))))
+   (TimedMultiSet. ms timeout (pm/priority-map) [] [])))
+(defn make-timed-buffered-multiset
+  [timeout size]
+  (make-timed-multiset timeout (make-buffered-multiset size)))
 
 ;; TODO: hash-get-latest
 (defprotocol HashBasic
