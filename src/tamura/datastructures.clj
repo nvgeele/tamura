@@ -16,8 +16,8 @@
 
 (defprotocol MultiSet
   (multiset-contains? [this val])
-  (multiset-minus [this l r])
-  (multiset-union [this l r])
+  (multiset-minus [this r])
+  (multiset-union [this r])
 
   ;; TODO: return dictionary?
   (multiset-multiplicities [this]))
@@ -38,11 +38,11 @@
   MultiSet
   (multiset-contains? [this val]
     (contains? ms val))
-  (multiset-minus [this l r]
-    (-> (ms/minus (.ms l) (.ms r))
+  (multiset-minus [this r]
+    (-> (ms/minus (.ms this) (.ms r))
         (RegularMultiSet.)))
-  (multiset-union [this l r]
-    (-> (ms/union (.ms l) (.ms r))
+  (multiset-union [this r]
+    (-> (ms/union (.ms this) (.ms r))
         (RegularMultiSet.)))
   (multiset-multiplicities [this]
     (ms/multiplicities ms)))
