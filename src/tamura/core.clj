@@ -617,6 +617,27 @@
         (send-subscribers @subscribers true buffer id)
         (recur (<! input) (:value msg) buffer-list buffer)))))
 
+(comment
+  (let [new-element (first (to-multiset
+                             (if previous
+                               (multiset-minus (:value msg) previous)
+                               (:value msg))))
+        removed (if previous
+                  (multiset-minus previous (:value msg))
+                  (make-multiset))]
+    (when-not (multiset-empty? removed)
+      (doseq [el (to-multiset removed)]
+        (.remove buffer-list el)))
+    (when (= (count buffer-list) size)
+      (.removeLast buffer-list))
+    (if new-element
+      (do (.addFirst buffer-list new-element)
+          (let [buffer (make-multiset (apply ms/multiset buffer-list))]
+            (send-subscribers @subscribers true buffer id)
+            (recur (<! input) (:value msg) buffer-list buffer)))
+      (do (send-subscribers @subscribers true buffer id)
+          (recur (<! input) (:value msg) buffer-list buffer)))))
+
 ;; TODO: WE WILL ALWAYS NEED TO DETECT REMOVALS
 (core/defn make-buffer-node
   [id [size] [input-node]]
@@ -627,8 +648,7 @@
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               previous nil
-              buffer-list (LinkedList.)
-              buffer (if hash? (make-hash) (make-multiset))]
+              buffer (if hash? (make-hash) (make-buffered-multiset size))]
       (log/debug (str "buffer-node " id " has received: " msg))
       (cond (and (:changed? msg) hash?)
             ;; TODO
@@ -641,23 +661,18 @@
                                          (:value msg))))
                   removed (if previous
                             (multiset-minus previous (:value msg))
-                            (make-multiset))]
-              (when-not (multiset-empty? removed)
-                (doseq [el (to-multiset removed)]
-                  (.remove buffer-list el)))
-              (when (= (count buffer-list) size)
-                (.removeLast buffer-list))
-              (if new-element
-                (do (.addFirst buffer-list new-element)
-                    (let [buffer (make-multiset (apply ms/multiset buffer-list))]
-                      (send-subscribers @subscribers true buffer id)
-                      (recur (<! input) (:value msg) buffer-list buffer)))
-                (do (send-subscribers @subscribers true buffer id)
-                    (recur (<! input) (:value msg) buffer-list buffer))))
+                            (make-multiset))
+                  buffer (multiset-insert
+                           (if (multiset-empty? removed)
+                             buffer
+                             (reduce #(multiset-remove %1 %2) buffer (to-multiset removed)))
+                           new-element)]
+              (send-subscribers @subscribers true (to-regular-multiset buffer) id)
+              (recur (<! input) (:value msg) buffer))
 
             :else
             (do (send-subscribers @subscribers false buffer id)
-                (recur (<! input) previous buffer-list buffer))))
+                (recur (<! input) previous buffer))))
     (Node. id ::buffer (:return-type input-node) sub-chan)))
 (register-constructor! ::buffer make-buffer-node)
 
