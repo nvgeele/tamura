@@ -416,6 +416,35 @@
     (Node. id ::filter (:return-type input-node) sub-chan)))
 (register-constructor! ::filter make-filter-node)
 
+(comment "Semantics delay, after non-leased/buffered source"
+  "multiset"
+  #{1}     => #{}
+  #{1 2}   => #{1}
+  #{1 2 3} => #{1 2}
+
+  "hash"
+  {:a #{1}}           => {}
+  {:a #{1} :b #{1}}   => {:a #{1}}
+  {:a #{1 2} :b #{1}} => {:a #{1} :b #{1}})
+
+(comment "Semantics delay, after leasing/buffer"
+  "multiset (buffer size 3)"
+  #{1}        => #{}
+  #{1 2}      => #{1}
+  #{1 2 3}    => #{1 2}
+  #{2 3 4}    => #{1 2 3}
+  #{2 3 4 5}  => #{2 3 4}
+
+  "hash (buffer size 2)"
+  {:a #{1}}                   => {}
+  {:a #{1 2}}                 => {:a #{1}}
+  {:a #{1 2} :b #{1}}         => {:a #{1 2}}
+  {:a #{1 2} :b #{1 2}}       => {:a #{1 2} :b #{1}}
+  - timeout for :a -
+  {:b #{1 2} :c #{1}}         => {:a #{1 2} :b #{1 2}}
+  {:b #{1 2} :c #{1} :a #{3}} => {:b #{1 2} :c #{1}}
+  {:b #{2 3} :c #{1} :a #{3}} => {:b #{1 2} :c #{1} :a #{3}})
+
 ;; TODO: put in docstring that it emits empty hash or set
 ;; TODO: make sure it still works with leasing
 
@@ -427,38 +456,10 @@
         hash-input? (= (:return-type input-node) :hash)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              previous (set nil)
-              delayed nil]
+              previous (if hash-input? (make-hash) (make-multiset))]
       (log/debug (str "delay-node " id " has received: " msg))
-      (cond (and (:changed? msg) hash-input?)
-            (let [previous-keys (set (hash-keys previous))
-                  new-keys (set (hash-keys (:value msg)))
-                  removed-keys (cs/difference previous-keys new-keys)
-                  new-set (hash->set (:value msg))
-                  previous-set (hash->set previous)
-                  new-element (first (cs/difference new-set previous-set))
-                  delayed (if-let [existing (hash-get previous (first new-element))]
-                            (hash-insert delayed (first new-element) existing)
-                            (or delayed (make-hash)))
-                  delayed (reduce #(hash-remove %1 %2) delayed removed-keys)]
-              (doseq [sub @subscribers]
-                (>! sub {:changed? true :value delayed :from id}))
-              (recur (<! input) (:value msg) delayed))
-
-            ;; NOTE: added the nil's because of the refactoring
-            (:changed? msg)
-            (let [delayed (or delayed (make-multiset))
-                  added (multiset-minus nil (:value msg) delayed)
-                  removed (multiset-minus nil delayed (:value msg))
-                  delayed (if removed (multiset-minus nil delayed removed) delayed)]
-              (doseq [sub @subscribers]
-                (>! sub {:changed? true :value delayed :from id}))
-              (recur (<! input) nil (multiset-union nil delayed added)))
-
-            :else
-            (do (doseq [sub @subscribers]
-                  (>! sub {:changed? false :value delayed :from id}))
-                (recur (<! input) previous delayed))))
+      (send-subscribers @subscribers (:changed? msg) previous id)
+      (recur (<! input) (if (:changed? msg) (:value msg) previous)))
     (Node. id ::delay (:return-type input-node) sub-chan)))
 (register-constructor! ::delay make-delay-node)
 
@@ -827,36 +828,6 @@
   [:a 4] => {:a [3 4]}
   - 5 seconds wait -
   [:a 5] => {:a [4 5]})
-
-(comment "Semantics delay, after non-leased/buffered source"
-  "multiset"
-  #{}      => #{}
-  #{1}     => #{}
-  #{1 2}   => #{1}
-  #{1 2 3} => #{1 2}
-
-  "hash"
-  {:a [1]}          => {}
-  {:a [1] :b [1]}   => {:a [1]}
-  {:a [1 2] :b [1]} => {:a [1] :b [1]})
-
-(comment "Semantics delay, after leasing/buffer (in this case buffer with size 2)"
-  "multiset"
-  #{}         => #{}
-  #{1}        => #{}
-  #{1 2}      => #{1}
-  #{1 2 3}    => #{1 2}
-  #{2 3 4}    => #{2 3}
-  #{2 3 4 5}  => #{2 3 4}
-
-  "buffer"
-  {}                     => {}
-  {:a [1]}               => {}
-  {:a [1] :b [1]}        => {}
-  {:a [2] :b [1]}        => {:a [1]}
-  {:a [2] :b [2]}        => {:a [1] :b [1]}
-  {:b [2] :c [1]}        => {:b [1]}
-  {:b [2] :c [1] :a [3]} => {:b [1]})
 
 (comment "Semantics buffer (size 3)"
   "multiset"

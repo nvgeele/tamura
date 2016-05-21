@@ -143,6 +143,45 @@
       (Thread/sleep 1100)
       (send-receive :b 1) => {:a (ms/multiset 3) :b (ms/multiset 1)})))
 
+(facts "about delay"
+  (facts "multiset"
+    (test-multiset-node #(core/make-delay-node (core/new-id!) [] [%])
+      (send-receive 1) => (ms/multiset)
+      (send-receive 2) => (ms/multiset 1)
+      (send-receive 3) => (ms/multiset 1 2)))
+  (facts "hash"
+    (test-hash-node #(core/make-delay-node (core/new-id!) [] [%])
+      (send-receive [:a 1]) => {}
+      (send-receive [:b 1]) => {:a (ms/multiset 1)}
+      (send-receive [:a 2]) => {:a (ms/multiset 1) :b (ms/multiset 1)}))
+  (facts "about delay after leased and buffered node"
+    (facts "multiset"
+      (test-node :multiset (t/seconds 2) #(core/make-delay-node (core/new-id!) [] [%]) 3
+        (send-receive 1) => (ms/multiset)
+        (send-receive 2) => (ms/multiset 1)
+        (send-receive 3) => (ms/multiset 1 2)
+        (send-receive 4) => (ms/multiset 1 2 3)
+        (send-receive 5) => (ms/multiset 2 3 4)
+        (Thread/sleep 2100)
+        (send-receive 6) => (ms/multiset 3 4 5)
+        (send-receive 7) => (ms/multiset 6)))
+    (comment "Semantics delay, after leasing/buffer"
+      "hash (buffer size 2)"
+
+
+      )
+    (facts "hash"
+      (test-node :hash (t/seconds 2) #(core/make-delay-node (core/new-id!) [] [%]) 2
+        (send-receive [:a 1]) => {}
+        (send-receive [:a 2]) => {:a (ms/multiset 1)}
+        (Thread/sleep 1000)
+        (send-receive [:b 1]) => {:a (ms/multiset 1 2)}
+        (send-receive [:b 2]) => {:a (ms/multiset 1 2) :b (ms/multiset 1)}
+        (Thread/sleep 1100)
+        (send-receive [:c 1]) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
+        (send-receive [:a 3]) => {:b (ms/multiset 1 2) :c (ms/multiset 1)}
+        (send-receive [:b 3]) => {:b (ms/multiset 1 2) :c (ms/multiset 1) :a (ms/multiset 3)}))))
+
 (comment
   (facts "about leasing"
     (facts "about delay after leased hash source node"
@@ -275,31 +314,6 @@
 
         (send [:e 1])
         (receive) => {:b 2 :d 1 :e 1})))
-
-  (facts "about make-delay-node"
-    (facts "about make-delay-node with multisets"
-      (test-multiset-node #(core/make-delay-node (core/new-id!) [] [%])
-        (send 1)
-        (receive) => (ms/multiset)
-
-        (send 2)
-        (receive) => (ms/multiset 1)
-
-        (send 3)
-        (receive) => (ms/multiset 1 2)))
-    (facts "about make-delay-node with hashes"
-      (test-hash-node #(core/make-delay-node (core/new-id!) [] [%])
-        (send [1 {:v 1}])
-        (receive) => {}
-
-        (send [2 {:v 1}])
-        (receive) => {}
-
-        (send [1 {:v 2}])
-        (receive) => {1 {:v 1}}
-
-        (send [2 {:v 2}])
-        (receive) => {1 {:v 1} 2 {:v 1}})))
 
   (facts "about make-multiplicities-node"
     (test-multiset-node #(core/make-multiplicities-node (core/new-id!) [] [%])
