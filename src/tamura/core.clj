@@ -274,7 +274,7 @@
               subs []
               value (cond (and buffer timeout)
                           (if (= return-type :multiset)
-                            (make-timed-multiset timeout (make-buffered-multiset buffer))
+                            (make-timed-buffered-multiset timeout buffer)
                             (make-timed-buffered-hash timeout buffer))
                           buffer
                           (if (= return-type :multiset)
@@ -624,21 +624,15 @@
                                (:value msg))))
         removed (if previous
                   (multiset-minus previous (:value msg))
-                  (make-multiset))]
-    (when-not (multiset-empty? removed)
-      (doseq [el (to-multiset removed)]
-        (.remove buffer-list el)))
-    (when (= (count buffer-list) size)
-      (.removeLast buffer-list))
-    (if new-element
-      (do (.addFirst buffer-list new-element)
-          (let [buffer (make-multiset (apply ms/multiset buffer-list))]
-            (send-subscribers @subscribers true buffer id)
-            (recur (<! input) (:value msg) buffer-list buffer)))
-      (do (send-subscribers @subscribers true buffer id)
-          (recur (<! input) (:value msg) buffer-list buffer)))))
+                  (make-multiset))
+        buffer (multiset-insert
+                 (if (multiset-empty? removed)
+                   buffer
+                   (reduce #(multiset-remove %1 %2) buffer (to-multiset removed)))
+                 new-element)]
+    (send-subscribers @subscribers true (to-regular-multiset buffer) id)
+    (recur (<! input) (:value msg) buffer)))
 
-;; TODO: WE WILL ALWAYS NEED TO DETECT REMOVALS
 (core/defn make-buffer-node
   [id [size] [input-node]]
   (let [sub-chan (chan)
@@ -648,25 +642,20 @@
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               previous nil
-              buffer (if hash? (make-hash) (make-buffered-multiset size))]
+              buffer (if hash? (make-buffered-hash size) (make-buffered-multiset size))]
       (log/debug (str "buffer-node " id " has received: " msg))
       (cond (and (:changed? msg) hash?)
-            ;; TODO
-            nil
+            (let [removed (hash-removed (:value msg))
+                  inserted (first (hash-inserted (:value msg)))
+                  buffer (hash-insert (reduce #(hash-remove-element %1 (first %2) (second %2)) buffer removed)
+                                      (first inserted) (second inserted))]
+              (send-subscribers @subscribers true (to-regular-hash buffer) id)
+              (recur (<! input) (:value msg) buffer))
 
             (:changed? msg)
-            (let [new-element (first (to-multiset
-                                       (if previous
-                                         (multiset-minus (:value msg) previous)
-                                         (:value msg))))
-                  removed (if previous
-                            (multiset-minus previous (:value msg))
-                            (make-multiset))
-                  buffer (multiset-insert
-                           (if (multiset-empty? removed)
-                             buffer
-                             (reduce #(multiset-remove %1 %2) buffer (to-multiset removed)))
-                           new-element)]
+            (let [new (first (multiset-inserted (:value msg)))
+                  removed (multiset-removed (:value msg))
+                  buffer (multiset-insert (reduce #(multiset-remove %1 %2) buffer removed) new)]
               (send-subscribers @subscribers true (to-regular-multiset buffer) id)
               (recur (<! input) (:value msg) buffer))
 
