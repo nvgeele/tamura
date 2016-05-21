@@ -4,10 +4,6 @@
             [clj-time.core :as t])
   (:import [java.util LinkedList]))
 
-;; TODO: tests for multiset-inserted and multiset-removed
-;; TODO: tests for hash-inserted and hash-removed
-
-;; TODO: to-multiset
 (defprotocol MultiSetBasic
   (multiset-insert [this val])
   (multiset-remove [this val])
@@ -160,20 +156,24 @@
   (hash-get [h key]
     (get hash key))
   (hash-insert [h key val]
-    ;; TODO: inserted + removed
-    (hash-update h key #(multiset-insert (if % % (init)) val)))
-  (hash-remove [h key]
-    ;; TODO: removed
-    (-> (dissoc hash key)
-        (HashImpl. init removed inserted)))
-  (hash-remove-element [h key val]
-    ;; TODO: removed
     (let [items (get hash key (init))
-          new-items (multiset-remove items val)]
+          new-items (multiset-insert items val)
+          hash (assoc hash key new-items)
+          removed (map vector (repeat key) (multiset-removed new-items))]
+      (HashImpl. hash init [[key val]] removed)))
+  (hash-remove [h key]
+    (let [items (get hash key (init))
+          hash (dissoc hash key)
+          removed (map vector (repeat key) (to-multiset items))]
+      (HashImpl. hash init [] removed)))
+  (hash-remove-element [h key val]
+    (let [items (get hash key (init))
+          new-items (multiset-remove items val)
+          removed (map vector (repeat key) (multiset-removed new-items))]
       (HashImpl. (if (multiset-empty? new-items)
                    (dissoc hash key)
                    (assoc hash key new-items))
-                 init removed inserted)))
+                 init [] removed)))
   (hash-inserted [this]
     inserted)
   (hash-removed [this]
@@ -182,14 +182,14 @@
     (reduce-kv #(assoc %1 %2 (to-multiset %3)) {} hash))
   (to-regular-hash [h]
     (HashImpl. (reduce-kv #(assoc %1 %2 (to-regular-multiset %3)) {} hash)
-               make-multiset removed inserted))
+               make-multiset inserted removed))
 
   Hash
   (hash-contains? [h key]
     (contains? hash key))
   (hash-update [h key f]
     (-> (update hash key f)
-        (HashImpl. init removed inserted)))
+        (HashImpl. init inserted removed)))
   (hash->set [h]
     (set (to-hash h)))
   (hash-keys [this]
@@ -197,42 +197,45 @@
 
 ;; TODO: write tests for remove etc
 ;; TODO: do we need to filter the pm in hash-remove ?
-(deftype TimedHash [hash timeout pm]
+(deftype TimedHash [hash timeout pm inserted removed]
   HashBasic
   (hash-get [h key]
     (hash-get hash key))
   (hash-insert [h key val]
     (let [now (t/now)
           cutoff (t/minus now timeout)
-          [new-hash new-pm]
+          [new-hash new-pm removed]
           (loop [pm (assoc pm [key val] now)
-                 hash hash]
+                 hash hash
+                 removed []]
             (let [[[k v] t] (peek pm)]
               (if (t/before? t cutoff)
                 (let [hash (hash-remove-element hash k v)
                       pm (pop pm)]
-                  (recur pm hash))
-                [hash pm])))]
-      (-> (hash-insert new-hash key val)
-          (TimedHash. timeout new-pm))))
+                  (recur pm hash (concat removed (hash-removed hash))))
+                [hash pm removed])))
+          hash (hash-insert new-hash key val)
+          removed (concat removed (hash-removed hash))]
+      (TimedHash. hash timeout new-pm [[key val]] removed)))
   (hash-remove [h key]
     (let [hash (hash-remove hash key)
           pm (filter (fn [[[k v] t]] (not (= k key))) pm)]
-      (TimedHash. hash timeout pm)))
+      (TimedHash. hash timeout pm [] (hash-removed hash))))
   (hash-remove-element [h key val]
     (let [hash (hash-remove-element hash key val)
           pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
-      (TimedHash. hash timeout pm)))
+      (TimedHash. hash timeout pm [] (hash-removed hash))))
   (hash-inserted [this]
-    [])
+    inserted)
   (hash-removed [this]
-    [])
+    removed)
   (to-hash [h]
-    ;; TODO: perform expirations
+    ;; TODO: perform expirations?
     (to-hash hash))
-  (to-regular-hash [h]
-    ;; TODO: perform expirations
-    (to-regular-hash hash))
+  (to-regular-hash [this]
+    ;; TODO: perform expirations?
+    (let [rh (to-regular-hash hash)]
+      (HashImpl. (.hash rh) make-multiset inserted removed)))
 
   Hash
   (hash-contains? [h key]
@@ -253,7 +256,7 @@
   ([size hash] (HashImpl. hash #(make-buffered-multiset size) [] [])))
 (defn make-timed-hash
   [timeout]
-  (TimedHash. (make-hash) timeout (pm/priority-map)))
+  (TimedHash. (make-hash) timeout (pm/priority-map) [] []))
 (defn make-timed-buffered-hash
   [timeout size]
-  (TimedHash. (make-buffered-hash size) timeout (pm/priority-map)))
+  (TimedHash. (make-buffered-hash size) timeout (pm/priority-map) [] []))
