@@ -217,110 +217,11 @@
         (send-receive [:d 1]) => {:d (ms/multiset 1)}
         (send-receive [:e 1]) => {:d (ms/multiset 1) :e (ms/multiset 1)}))))
 
-(comment
-  (facts "about leasing"
-    (facts "about delay after leased hash source node"
-      (test-node :hash
-        (t/seconds 2)
-        #(core/make-delay-node (core/new-id!) [] [%])
-
-        (send [:a 1])
-        (receive) => {}
-
-        (send [:b 1])
-        (receive) => {}
-
-        (send [:a 2])
-        (receive) => {:a 1}
-
-        (Thread/sleep 500)
-
-        (send [:b 2])
-        (receive) => {:a 1 :b 1}
-
-        (Thread/sleep 1750)
-
-        (send [:c 1])
-        (receive) => {:b 1}
-
-        (send [:a 3])
-        (receive) => {:b 1}))
-    (facts "about delay after leased multiset source node"
-      (test-node :multiset
-        (t/seconds 2)
-        #(core/make-delay-node (core/new-id!) [] [%])
-
-        (send 1)
-        (receive) => (ms/multiset)
-
-        (Thread/sleep 500)
-
-        (send 2)
-        (receive) => (ms/multiset 1)
-
-        (send 3)
-        (receive) => (ms/multiset 1 2)
-
-        (Thread/sleep 1800)
-
-        (send 4)
-        (receive) => (ms/multiset 2 3)
-
-        (send 5)
-        (receive) => (ms/multiset 2 3 4)))
-    (facts "about buffer after leased hash source node"
-      (test-node :hash
-        (t/seconds 2)
-        #(core/make-buffer-node (core/new-id!) [2] [%])
-
-        (send [:a 1])
-        (receive) => {:a 1}
-
-        (send [:b 1])
-        (receive) => {:a 1 :b 1}
-
-        (send [:c 1])
-        (receive) => {:b 1 :c 1}
-
-        (Thread/sleep 3000)
-
-        (send [:d 1])
-        (receive) => {:d 1}
-
-        (send [:e 1])
-        (receive) => {:d 1 :e 1}))
-    (facts "about buffer after leased multiset source node"
-      (test-node :multiset
-        (t/seconds 2)
-        #(core/make-buffer-node (core/new-id!) [2] [%])
-
-        (send 1)
-        (receive) => (ms/multiset 1)
-
-        (send 2)
-        (receive) => (ms/multiset 1 2)
-
-        (send 3)
-        (receive) => (ms/multiset 2 3)
-
-        (Thread/sleep 3000)
-
-        (send 4)
-        (receive) => (ms/multiset 4)
-
-        (send 5)
-        (receive) => (ms/multiset 4 5))))
-
-  (facts "about make-multiplicities-node"
-    (test-multiset-node #(core/make-multiplicities-node (core/new-id!) [] [%])
-      (send 'a)
-      (receive) => (ms/multiset ['a 1])
-
-      (send 'b)
-      (receive) => (ms/multiset ['a 1] ['b 1])
-
-      (send 'b)
-      (receive) => (ms/multiset ['a 1] ['b 2]))))
+(facts "about make-multiplicities-node"
+  (test-multiset-node #(core/make-multiplicities-node (core/new-id!) [] [%])
+    (send-receive 'a) => (ms/multiset ['a 1])
+    (send-receive 'b) => (ms/multiset ['a 1] ['b 1])
+    (send-receive 'b) => (ms/multiset ['a 1] ['b 2])))
 
 ;; TODO: perform this test
 (comment

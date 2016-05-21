@@ -480,16 +480,13 @@
       (throw (Exception. "input to multiplicities must have multiset as return type")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value nil]
+              value (make-multiset)]
       (log/debug (str "multiplicities-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [multiplicities (multiset-multiplicities (:value msg))
-              new-set (make-multiset (apply ms/multiset (seq multiplicities)))]
-          (doseq [sub @subscribers]
-            (>! sub {:changed? true :value new-set :from id}))
-          (recur (<! input) new-set))
-        (do (doseq [sub @subscribers]
-              (>! sub {:changed? false :value value :from id}))
+        (let [multiplicities (multiset-multiplicities (:value msg))]
+          (send-subscribers @subscribers true multiplicities id)
+          (recur (<! input) multiplicities))
+        (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (Node. id ::multiplicities :multiset sub-chan)))
 (register-constructor! ::multiplicities make-multiplicities-node)

@@ -50,7 +50,7 @@
     (-> (ms/union (.ms this) (.ms r))
         (RegularMultiSet. [] [])))
   (multiset-multiplicities [this]
-    (ms/multiplicities ms)))
+    (RegularMultiSet. (apply ms/multiset (seq (ms/multiplicities ms))) [] [])))
 
 ;; TODO: make copies of linked list or use clojure implementation
 (deftype BufferedMultiSet [ms size buffer-list inserted removed]
