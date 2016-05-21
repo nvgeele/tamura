@@ -147,6 +147,52 @@
   (hash-keys [this]
     (keys hash)))
 
+;; TODO: write tests for remove etc
+;; TODO: do we need to filter the pm in hash-remove ?
+(deftype TimedHash [hash timeout pm]
+  HashBasic
+  (hash-get [h key]
+    (hash-get hash key))
+  (hash-insert [h key val]
+    (let [now (t/now)
+          cutoff (t/minus now timeout)
+          [new-hash new-pm]
+          (loop [pm (assoc pm [key val] now)
+                 hash hash]
+            (let [[[k v] t] (peek pm)]
+              (if (t/before? t cutoff)
+                (let [hash (hash-remove-element hash k v)
+                      pm (pop pm)]
+                  (recur pm hash))
+                [hash pm])))]
+      (-> (hash-insert new-hash key val)
+          (TimedHash. timeout new-pm))))
+  (hash-remove [h key]
+    (let [hash (hash-remove hash key)
+          pm (filter (fn [[[k v] t]] (not (= k key))) pm)]
+      (TimedHash. hash timeout pm)))
+  (hash-remove-element [h key val]
+    (let [hash (hash-remove-element hash key val)
+          pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
+      (TimedHash. hash timeout pm)))
+  (to-hash [h]
+    ;; TODO: perform expirations
+    (to-hash hash))
+  (to-regular-hash [h]
+    ;; TODO: perform expirations
+    (to-regular-hash hash))
+
+  Hash
+  (hash-contains? [h key]
+    (hash-contains? hash key))
+  (hash-update [h key f]
+    (hash-update hash key f))
+  (hash->set [h]
+    ;; TODO: Perform expirations?
+    (hash->set hash))
+  (hash-keys [this]
+    (hash-keys hash)))
+
 (defn make-hash
   ([] (make-hash {}))
   ([hash] (HashImpl. make-multiset hash)))
@@ -154,8 +200,8 @@
   ([size] (make-buffered-hash size {}))
   ([size hash] (HashImpl. #(make-buffered-multiset size) hash)))
 (defn make-timed-hash
-  ([timeout] (make-timed-hash timeout {}))
-  ([timeout hash] (HashImpl. #(make-timed-multiset timeout) {})))
+  [timeout]
+  (TimedHash. (make-hash) timeout (pm/priority-map)))
 (defn make-timed-buffered-hash
-  ([timeout size] (make-timed-buffered-hash timeout size {}))
-  ([timeout size hash] (HashImpl. #(make-timed-multiset timeout (make-buffered-multiset size)) {})))
+  [timeout size]
+  (TimedHash. (make-buffered-hash size) timeout (pm/priority-map)))
