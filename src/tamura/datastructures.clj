@@ -130,7 +130,9 @@
   (hash-remove-element [h key val]
     (let [items (get hash key (init))
           new-items (multiset-remove items val)]
-      (HashImpl. init (assoc hash key new-items))))
+      (HashImpl. init (if (empty? new-items)
+                        (dissoc hash key)
+                        (assoc hash key new-items)))))
   (to-hash [h]
     (reduce-kv #(assoc %1 %2 (to-multiset %3)) {} hash))
   (to-regular-hash [h]
