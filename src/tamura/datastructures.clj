@@ -1,8 +1,17 @@
 (ns tamura.datastructures
   (:require [clojure.data.priority-map :as pm]
             [multiset.core :as ms]
-            [clj-time.core :as t])
-  (:import [java.util LinkedList]))
+            [clj-time.core :as t]
+            [amalloy.ring-buffer :as rb]))
+
+(defn- buffer-remove-last
+  [buffer size val]
+  (loop [items buffer
+         buffer (rb/ring-buffer size)
+         switch? true]
+    (cond (empty? items) buffer
+          (and (= (peek items) val) switch?) (recur (pop items) buffer false)
+          :else (recur (pop items) (conj buffer (peek items)) switch?))))
 
 (defprotocol MultiSetBasic
   (multiset-insert [this val])
@@ -52,24 +61,20 @@
   (multiset-multiplicities [this]
     (RegularMultiSet. (apply ms/multiset (seq (ms/multiplicities ms))) [] [])))
 
-;; TODO: make copies of linked list or use clojure implementation
 (deftype BufferedMultiSet [ms size buffer-list inserted removed]
   MultiSetBasic
   (multiset-insert [this val]
     (if (= (count buffer-list) size)
-      (let [rel (.removeLast buffer-list)
+      (let [rel (peek buffer-list)
             msr (multiset-remove ms rel)
             msa (multiset-insert msr val)]
-        (.addFirst buffer-list val)
-        (BufferedMultiSet. msa size buffer-list (multiset-inserted msa) (multiset-removed msr)))
+        (BufferedMultiSet. msa size (conj buffer-list val) (multiset-inserted msa) (multiset-removed msr)))
       (let [ms (multiset-insert ms val)]
-        (.addFirst buffer-list val)
-        (BufferedMultiSet. ms size buffer-list (multiset-inserted ms) (multiset-removed ms)))))
+        (BufferedMultiSet. ms size (conj buffer-list val) (multiset-inserted ms) (multiset-removed ms)))))
   (multiset-remove [this val]
     (if (multiset-contains? ms val)
       (let [ms (multiset-remove ms val)]
-        (.removeLastOccurrence buffer-list val)
-        (BufferedMultiSet. ms size buffer-list [] (multiset-removed ms)))
+        (BufferedMultiSet. ms size (buffer-remove-last buffer-list size val) [] (multiset-removed ms)))
       (BufferedMultiSet. ms size buffer-list [] [])))
   (multiset-empty? [this]
     (multiset-empty? ms))
@@ -124,7 +129,7 @@
   ([size]
    (make-buffered-multiset size (make-multiset)))
   ([size ms]
-   (BufferedMultiSet. ms size (LinkedList.) [] [])))
+   (BufferedMultiSet. ms size (rb/ring-buffer size) [] [])))
 (defn make-timed-multiset
   ([timeout]
    (make-timed-multiset timeout (make-multiset)))

@@ -9,6 +9,7 @@
                  [org.clojure/data.priority-map "0.0.7"]
                  [org.clojure/tools.logging "0.3.1"]
                  [clj-time "0.11.0"]
+                 [amalloy/ring-buffer "1.2"]
                  [log4j/log4j "1.2.17" :exclusions [javax.mail/mail
                                                     javax.jms/jms
                                                     com.sun.jmdk/jmxtools
