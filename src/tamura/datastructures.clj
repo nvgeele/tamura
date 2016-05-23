@@ -17,6 +17,7 @@
   (multiset-insert [this val])
   (multiset-remove [this val])
   (multiset-empty? [this])
+  (multiset-insert-and-remove [this to-insert to-remove])
   (multiset-inserted [this])
   (multiset-removed [this])
   (to-multiset [this])
@@ -40,6 +41,11 @@
       (RegularMultiSet. ms [] [])))
   (multiset-empty? [this]
     (empty? ms))
+  (multiset-insert-and-remove [this to-insert to-remove]
+    (let [to-remove (filter #(contains? ms %) to-remove)
+          msi (reduce #(conj %1 %2) ms to-insert)
+          msr (reduce #(disj %1 %2) msi to-remove)]
+      (RegularMultiSet. msr to-insert to-remove)))
   (multiset-inserted [this]
     inserted)
   (multiset-removed [this]
@@ -78,6 +84,7 @@
       (BufferedMultiSet. ms size buffer-list [] [])))
   (multiset-empty? [this]
     (multiset-empty? ms))
+  (multiset-insert-and-remove [this to-insert to-remove])
   (multiset-inserted [this]
     inserted)
   (multiset-removed [this]
@@ -112,6 +119,7 @@
       (TimedMultiSet. new-ms timeout new-pm [] (multiset-removed new-ms))))
   (multiset-empty? [this]
     (multiset-empty? ms))
+  (multiset-insert-and-remove [this to-insert to-remove])
   (multiset-inserted [this]
     inserted)
   (multiset-removed [this]
@@ -145,6 +153,7 @@
   (hash-insert [h key val])
   (hash-remove [h key])
   (hash-remove-element [h key val])
+  (hash-insert-and-remove [this to-insert to-remove])
   (hash-inserted [this])
   (hash-removed [this])
   (to-hash [h])
@@ -179,6 +188,7 @@
                    (dissoc hash key)
                    (assoc hash key new-items))
                  init [] removed)))
+  (hash-insert-and-remove [this to-insert to-remove])
   (hash-inserted [this]
     inserted)
   (hash-removed [this]
@@ -230,6 +240,7 @@
     (let [hash (hash-remove-element hash key val)
           pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
       (TimedHash. hash timeout pm [] (hash-removed hash))))
+  (hash-insert-and-remove [this to-insert to-remove])
   (hash-inserted [this]
     inserted)
   (hash-removed [this]
