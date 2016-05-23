@@ -24,10 +24,12 @@
   (to-multiset [this])
   (to-regular-multiset [this]))
 
+;; TODO: tests for reduce
 (defprotocol MultiSet
   (multiset-contains? [this val])
   (multiset-minus [this r])
   (multiset-union [this r])
+  (multiset-reduce [this f] [this f initial])
 
   ;; TODO: return dictionary?
   (multiset-multiplicities [this]))
@@ -66,6 +68,14 @@
         (RegularMultiSet. [] [])))
   (multiset-union [this r]
     (-> (ms/union (.ms this) (.ms r))
+        (RegularMultiSet. [] [])))
+  (multiset-reduce [this f]
+    (-> (reduce f ms)
+        (ms/multiset)
+        (RegularMultiSet. [] [])))
+  (multiset-reduce [this f initial]
+    (-> (reduce f initial ms)
+        (ms/multiset)
         (RegularMultiSet. [] [])))
   (multiset-multiplicities [this]
     (RegularMultiSet. (apply ms/multiset (seq (ms/multiplicities ms))) [] [])))
@@ -177,7 +187,8 @@
   (make-timed-multiset timeout (make-buffered-multiset size)))
 
 ;; TODO: hash-get-latest
-;; TODO: test for hash-filter-key-size
+;; TODO: tests for hash-filter-key-size
+;; TODO: tests for hash-reduce-by-key
 (defprotocol HashBasic
   (hash-get [h key])
   (hash-insert [h key val])
@@ -195,6 +206,9 @@
   (hash-contains? [h key])
   (hash-keys [this])
   (hash->set [h]))
+
+(defprotocol HashRegularOnly
+  (hash-reduce-by-key [this f] [this f initial]))
 
 (deftype HashImpl [hash init inserted removed]
   HashBasic
@@ -253,7 +267,15 @@
   (hash->set [h]
     (set (to-hash h)))
   (hash-keys [this]
-    (keys hash)))
+    (keys hash))
+
+  HashRegularOnly
+  (hash-reduce-by-key [this f]
+    (-> (reduce-kv #(assoc %1 %2 (multiset-reduce %3 f)) {} hash)
+        (HashImpl. make-multiset [] [])))
+  (hash-reduce-by-key [this f initial]
+    (-> (reduce-kv #(assoc %1 %2 (multiset-reduce %3 f initial)) {} hash)
+        (HashImpl. make-multiset [] []))))
 
 ;; TODO: write tests for remove etc
 ;; TODO: do we need to filter the pm in hash-remove ?
