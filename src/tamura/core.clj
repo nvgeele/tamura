@@ -601,6 +601,42 @@
     (Node. id ::map-by-key :hash sub-chan)))
 (register-constructor! ::map-by-key make-map-by-key-node)
 
+(core/defn make-filter-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-multiset)]
+      (log/debug (str "filter node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (multiset-filter (:value msg) f)]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::filter :multiset sub-chan)))
+(register-constructor! ::filter make-filter-node)
+
+(core/defn make-filter-by-key-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-hash)]
+      (log/debug (str "filter-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (hash-filter-by-key (:value msg) f)]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::filter-by-key :hash sub-chan)))
+(register-constructor! ::filter-by-key make-filter-by-key-node)
+
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
 (core/defn- make-signal
@@ -755,6 +791,21 @@
     (v/signal? source) "argument to map-by-key should be a signal"
     (= (:return-type (get-node (v/value source))) :multiset) "input for map-by-key must be a hash")
   (make-signal (register-node! ::map-by-key :hash [f] [(v/value source)])))
+
+;; TODO: like reduce, make it work for regular collections too
+(core/defn filter
+  [source f]
+  (assert*
+    (v/signal? source) "argument to filter should be a signal"
+    (= (:return-type (get-node (v/value source))) :multiset) "input for filter must be a multiset")
+  (make-signal (register-node! ::filter :multiset [f] [(v/value source)])))
+
+(core/defn filter-by-key
+  [source f]
+  (assert*
+    (v/signal? source) "argument to filter-by-key should be a signal"
+    (= (:return-type (get-node (v/value source))) :multiset) "input for filter-by-key must be a hash")
+  (make-signal (register-node! ::filter-by-key :hash [f] [(v/value source)])))
 
 (defmacro print-signal
   [signal]

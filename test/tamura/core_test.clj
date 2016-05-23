@@ -342,6 +342,19 @@
     (send-receive :b 1) => {:a (ms/multiset 2) :b (ms/multiset 2)}
     (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2 3)}))
 
+(facts "about filter, function even?"
+  (test-multiset-node #(core/make-filter-node (core/new-id!) [even?] [%])
+    (send-receive 1) => (ms/multiset)
+    (send-receive 2) => (ms/multiset 2)
+    (send-receive 3) => (ms/multiset 2)))
+
+(facts "about filter-by-key, function even?"
+  (test-hash-node #(core/make-filter-by-key-node (core/new-id!) [even?] [%])
+    (send-receive :a 1) => {}
+    (send-receive :b 1) => {}
+    (send-receive :a 2) => {:a (ms/multiset 2)}
+    (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2)}))
+
 ;; TODO: perform this test
 (comment
   (defn test-sorting
