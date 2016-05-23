@@ -190,6 +190,18 @@
   {:a #{1} :b #{1}}   => #{[:a 1] [:b 1]}
   {:a #{1 2} :b #{1}} => #{[:a 1] [:a 2] [:b 1]})
 
+(comment "Semantics for map, function inc"
+  "multiset"
+  #{1}     => #{2}
+  #{1 2}   => #{2 3}
+  #{1 2 3} => #{2 3 4})
+
+(comment "Semantics for map-by-key, function inc"
+  "hash"
+  {:a #{1}}           => {:a #{2}}
+  {:a #{1} :b #{1}}   => {:a #{2} :b #{2}}
+  {:a #{1} :b #{1 2}} => {:a #{2} :b #{2 3}})
+
 (comment "Semantics source with time-based leasing (10 seconds)"
   "multiset"
 

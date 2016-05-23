@@ -318,6 +318,18 @@
     (send-receive* :b 1 :multiset) => (ms/multiset [:a 1] [:b 1])
     (send-receive* :b 2 :multiset) => (ms/multiset [:a 1] [:b 1] [:b 2])))
 
+(facts "about map, function inc"
+  (test-multiset-node #(core/make-map-node (core/new-id!) [inc] [%])
+    (send-receive 1) => (ms/multiset 2)
+    (send-receive 2) => (ms/multiset 2 3)
+    (send-receive 3) => (ms/multiset 2 3 4)))
+
+(facts "about map-by-key, function inc"
+  (test-hash-node #(core/make-map-by-key-node (core/new-id!) [inc] [%])
+    (send-receive :a 1) => {:a (ms/multiset 2)}
+    (send-receive :b 1) => {:a (ms/multiset 2) :b (ms/multiset 2)}
+    (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2 3)}))
+
 ;; TODO: perform this test
 (comment
   (defn test-sorting

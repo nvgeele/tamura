@@ -153,7 +153,7 @@
       true
       (let [id (first sorted)
             node (get @nodes id)
-            inputs (map #(:node (get @nodes %)) (:inputs node))
+            inputs (core/map #(:node (get @nodes %)) (:inputs node))
             node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)]
         (swap! nodes update-in [id :node] (constantly node-obj))
         (if (= (:node-type node) ::source)
@@ -260,7 +260,7 @@
 
 (core/defn subscribe-inputs
   [inputs]
-  (map subscribe-input inputs))
+  (core/map subscribe-input inputs))
 
 ;; TODO: use this in all nodes
 (defmacro send-subscribers
@@ -386,7 +386,7 @@
       (log/debug (str "map-to-multiset-node " id " has received: " msg))
       (if (:changed? msg)
         (let [values (selector (:value msg))
-              new-set (make-multiset (apply ms/multiset (map f values)))]
+              new-set (make-multiset (apply ms/multiset (core/map f values)))]
           (doseq [sub @subscribers]
             (>! sub {:changed? true :value new-set :from id}))
           (recur (<! input) new-set))
@@ -400,17 +400,17 @@
 (core/defn make-do-apply-node
   [id [action] input-nodes]
   (let [inputs (subscribe-inputs input-nodes)
-        selectors (map #(if (= (:return-type %) :hash) to-hash to-multiset) input-nodes)]
+        selectors (core/map #(if (= (:return-type %) :hash) to-hash to-multiset) input-nodes)]
     (go-loop [msgs
-              (map <!! inputs)
+              (core/map <!! inputs)
               #_(<! (first inputs))
               #_(for [input inputs] (<! input))
               ]
       (log/debug (str "do-apply-node " id " has received: " (seq msgs)))
       (when (ormap :changed? msgs)
-        (let [colls (map #(%1 (:value %2)) selectors msgs)]
+        (let [colls (core/map #(%1 (:value %2)) selectors msgs)]
           (apply action colls)))
-      (recur (map <!! inputs)
+      (recur (core/map <!! inputs)
              #_(<! (first inputs))
              #_(for [input inputs] (<! input))))
     (Sink. id ::do-apply)))
@@ -706,6 +706,46 @@
     (Node. id ::hash-to-multiset :multiset sub-chan)))
 (register-constructor! ::hash-to-multiset make-hash-to-multiset-node)
 
+(core/defn make-map-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (when-not (= (:return-type input-node) :multiset)
+      (throw (Exception. "input to map must be a multiset")))
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-multiset)]
+      (log/debug (str "map node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (multiset-map (:value msg) f)]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::map :multiset sub-chan)))
+(register-constructor! ::map make-map-node)
+
+(core/defn make-map-by-key-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (when-not (= (:return-type input-node) :hash)
+      (throw (Exception. "input to map-by-key must be a hash")))
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-hash)]
+      (log/debug (str "map-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (hash-map-by-key (:value msg) f)]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::map-by-key :hash sub-chan)))
+(register-constructor! ::map-by-key make-map-by-key-node)
+
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
 (core/defn- make-signal
@@ -759,7 +799,7 @@
 (core/defn do-apply
   [f arg & args]
   (if (andmap v/signal? (cons arg args))
-    (let [inputs (map v/value (cons arg args))
+    (let [inputs (core/map v/value (cons arg args))
           node (register-node! {:node-type ::do-apply :args [f] :inputs inputs})]
       (make-signal node))
     (throw (Exception. "do-apply needs to be applied to signals"))))
@@ -877,6 +917,19 @@
   (if (not (v/signal? source))
     (throw (Exception. "first argument to hash-to-multiset should be a signal"))
     (make-signal (register-node! {:node-type ::hash-to-multiset :inputs [(v/value source)]}))))
+
+;; TODO: like reduce, make it work for regular collections too
+(core/defn map
+  [source f]
+  (if (v/signal? source)
+    (make-signal (register-node! {:node-type ::map :args [f] :inputs [(v/value source)]}))
+    (throw (Exception. "first argument to map should be a signal"))))
+
+(core/defn map-by-key
+  [source f]
+  (if (v/signal? source)
+    (make-signal (register-node! {:node-type ::map-by-key :args [f] :inputs [(v/value source)]}))
+    (throw (Exception. "first argument to map-by-key should be a signal"))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous

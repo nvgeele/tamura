@@ -25,11 +25,13 @@
   (to-regular-multiset [this]))
 
 ;; TODO: tests for reduce
+;; TODO: tests for multiset-map
 (defprotocol MultiSet
   (multiset-contains? [this val])
   (multiset-minus [this r])
   (multiset-union [this r])
   (multiset-reduce [this f] [this f initial])
+  (multiset-map [this f])
 
   ;; TODO: return dictionary?
   (multiset-multiplicities [this]))
@@ -76,6 +78,9 @@
   (multiset-reduce [this f initial]
     (-> (reduce f initial ms)
         (ms/multiset)
+        (RegularMultiSet. [] [])))
+  (multiset-map [this f]
+    (-> (apply ms/multiset (map f ms))
         (RegularMultiSet. [] [])))
   (multiset-multiplicities [this]
     (RegularMultiSet. (apply ms/multiset (seq (ms/multiplicities ms))) [] [])))
@@ -209,6 +214,7 @@
 
 (defprotocol HashRegularOnly
   (hash-reduce-by-key [this f] [this f initial])
+  (hash-map-by-key [this f])
   (hash->multiset [this]))
 
 (deftype HashImpl [hash init inserted removed]
@@ -276,6 +282,9 @@
         (HashImpl. make-multiset [] [])))
   (hash-reduce-by-key [this f initial]
     (-> (reduce-kv #(assoc %1 %2 (multiset-reduce %3 f initial)) {} hash)
+        (HashImpl. make-multiset [] [])))
+  (hash-map-by-key [this f]
+    (-> (reduce-kv #(assoc %1 %2 (multiset-map %3 f)) {} hash)
         (HashImpl. make-multiset [] [])))
   (hash->multiset [this]
     (make-multiset (reduce (fn [acc [key ms]]
