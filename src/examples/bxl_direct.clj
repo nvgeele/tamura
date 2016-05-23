@@ -1,8 +1,12 @@
 (ns examples.bxl-direct
   (:require [tamura.core :as t]
-            [examples.spawner :as s]))
+            [clj-time.core :as time]
+            [examples.spawner :as s]
+            [clj-time.format :as f])
+  (:import [redis.clients.jedis JedisPool Jedis]))
 
-;;;;;;;;;;;;;;;
+(def redis-host "localhost")
+(def redis-key "bxlqueue")
 
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
@@ -16,36 +20,48 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
-(t/defsig positions (t/redis "localhost" "bxlqueue" :key :user-id))
-;(t/print-signal positions)
-
-(t/defsig old-positions (t/delay positions))
-;(t/print-signal old-positions)
-
-(t/defsig updates (t/zip positions old-positions))
-;(t/print-signal updates)
-
-(t/defsig directions (t/map-to-multiset (fn [[user-id [new old]]]
-                                          (calculate-direction (:position new) (:position old)))
-                                        updates))
-;(t/print-signal directions)
-
-(t/defsig direction-count (t/multiplicities directions))
-;(t/defsig direction-count (t/multiplicities (t/throttle directions 1000)))
-;(t/print-signal direction-count)
-
-(t/defsig max-direction (t/reduce #(if (> (second %1) (second %2)) %1 %2)
-                                  [nil -1]
-                                  direction-count))
-;(t/print-signal max-direction)
-
+(t/defsig max-direction (-> (t/redis redis-host redis-key :key :user-id :buffer 2)
+                            (t/filter-key-size 2)
+                            (t/reduce-by-key #(let [t1 (f/parse (:time %1))
+                                                    t2 (f/parse (:time %2))]
+                                               (if (time/before? t1 t2)
+                                                 (calculate-direction (:position %2) (:position %1))
+                                                 (calculate-direction (:position %1) (:position %2)))))
+                            (t/hash-to-multiset)
+                            (t/map second)
+                            (t/multiplicities)
+                            (t/reduce (fn [t1 t2]
+                                        (let [[d1 c1] t1
+                                              [d2 c2] t2]
+                                          (if (> c1 c2) t1 t2)))
+                                      [nil -1])))
 (t/print-signal (t/throttle max-direction 1000))
-;(t/print-signal max-direction)
 
 ;;;;;;;;;;;;;;;
 
+(defn spawn-thread
+  [id]
+  (let [conn (Jedis. redis-host)]
+    (t/threadloop []
+      (.rpush conn redis-key (into-array String [(str {:user-id  id
+                                                       :position [(Math/random) (Math/random)]
+                                                       :time     (str (time/now))})]))
+      (Thread/sleep 1000)
+      (recur))))
+
+(defn spawn-threads
+  [host queue num]
+  (doseq [i (range 0 num)]
+    (spawn-thread i)))
+
+(.addShutdownHook (Runtime/getRuntime)
+                  (Thread. (fn []
+                             (.del (Jedis. redis-host) redis-key)
+                             (println "Emptied queue")
+                             (flush))))
+
 (defn -main
   [& args]
-  (t/start)
-  (s/spawn-threads "localhost" "bxlqueue" 10)
+  (spawn-threads redis-host redis-key 10)
+  (t/start!)
   (println "Ready"))
