@@ -7,6 +7,7 @@
             [clojure.tools.logging :as log]
             [multiset.core :as ms]
             [potemkin :as p]
+            [tamura.macros :as macros]
             [tamura.values :as v])
   (:use [tamura.datastructures])
   (:import [redis.clients.jedis Jedis]))
