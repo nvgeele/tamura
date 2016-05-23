@@ -138,6 +138,10 @@
     (swap! nodes assoc id node)
     id))
 
+(core/defn get-node
+  [id]
+  (get @nodes id))
+
 ;; TODO: write appropriate test-code
 ;; TODO: build graph whilst sorting?
 (core/defn sort-nodes
@@ -557,16 +561,15 @@
       (log/debug (str "buffer-node " id " has received: " msg))
       (cond (and (:changed? msg) hash?)
             (let [removed (hash-removed (:value msg))
-                  inserted (first (hash-inserted (:value msg)))
-                  buffer (hash-insert (reduce #(hash-remove-element %1 (first %2) (second %2)) buffer removed)
-                                      (first inserted) (second inserted))]
+                  inserted (hash-inserted (:value msg))
+                  buffer (hash-insert-and-remove buffer inserted removed)]
               (send-subscribers @subscribers true (to-regular-hash buffer) id)
               (recur (<! input) (:value msg) buffer))
 
             (:changed? msg)
-            (let [new (first (multiset-inserted (:value msg)))
+            (let [new (multiset-inserted (:value msg))
                   removed (multiset-removed (:value msg))
-                  buffer (multiset-insert (reduce #(multiset-remove %1 %2) buffer removed) new)]
+                  buffer (multiset-insert-and-remove buffer new removed)]
               (send-subscribers @subscribers true (to-regular-multiset buffer) id)
               (recur (<! input) (:value msg) buffer))
 
@@ -575,6 +578,46 @@
                 (recur (<! input) previous buffer))))
     (Node. id ::buffer (:return-type input-node) sub-chan)))
 (register-constructor! ::buffer make-buffer-node)
+
+(core/defn make-diff-add-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        hash? (= (:return-type input-node) :hash)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-multiset)]
+      (log/debug (str "diff-add node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [inserted ((if hash? hash-inserted multiset-inserted) (:value msg))
+              value (make-multiset (apply ms/multiset inserted))]
+          (send-subscribers @subscribers false value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::delay (:return-type input-node) sub-chan)))
+(register-constructor! ::diff-add make-diff-add-node)
+
+(core/defn make-diff-remove-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        hash? (= (:return-type input-node) :hash)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-multiset)]
+      (log/debug (str "diff-remove node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [removed ((if hash? hash-removed multiset-removed) (:value msg))
+              value (make-multiset (apply ms/multiset removed))]
+          (send-subscribers @subscribers false value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::delay (:return-type input-node) sub-chan)))
+(register-constructor! ::diff-remove make-diff-remove-node)
 
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
@@ -702,14 +745,27 @@
 ;; TODO: corner case size 0
 (core/defn buffer
   [sig size]
-  (if (v/signal? sig)
-    (make-signal (register-source! {:node-type ::buffer :args [size] :inputs [(v/value sig)]}))
-    (throw (Exception. "first argument to delay should be a signal"))))
   (cond (not (v/signal? sig))
         (throw (Exception. "first argument to buffer should be a signal"))
         (= (:node-type (get-node (v/value sig))) ::source)
         (make-signal (register-source! {:node-type ::buffer :args [size] :inputs [(v/value sig)]}))
         :else (throw (Exception. "input for buffer node should be a source"))))
+
+(core/defn diff-add
+  [sig]
+  (cond (not (v/signal? sig))
+        (throw (Exception. "first argument to diff-add should be a signal"))
+        (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+        (make-signal (register-source! {:node-type ::diff-add :inputs [(v/value sig)]}))
+        :else (throw (Exception. "input for diff-add node should be a source, buffer, or delay"))))
+
+(core/defn diff-remove
+  [sig]
+  (cond (not (v/signal? sig))
+        (throw (Exception. "first argument to diff-remove should be a signal"))
+        (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+        (make-signal (register-source! {:node-type ::diff-remove :inputs [(v/value sig)]}))
+        :else (throw (Exception. "input for diff-remove node should be a source, buffer, or delay"))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous

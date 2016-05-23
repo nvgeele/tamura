@@ -108,6 +108,54 @@
   {:b #{1 2} :c #{1} :a #{3}} => {:b #{1 2} :c #{1}}
   {:b #{2 3} :c #{1} :a #{3}} => {:b #{1 2} :c #{1} :a #{3}})
 
+(comment "Semantics diff-add"
+  "multiser after source (timed)"
+  #{1}     => #{1}
+  #{1 2}   => #{2}
+  #{1 2 3} => #{3}
+  - timeout -
+  #{4}     => #{4}
+
+  "hash after source (timed)"
+  {:a #{1}}         => #{[:a 1]}
+  {:a #{1} :b #{1}} => #{[:b 1]}
+  - timeout -
+  {:c #{1}}         => #{[:c 1]}
+
+  "multiset after buffer (size 2)"
+  #{1}   => #{1}
+  #{1 2} => #{2}
+  #{2 3} => #{3}
+
+  "hash after buffer (size 2)"
+  {:a #{1}}   => #{[:a 1]}
+  {:a #{1 2}} => #{[:a 2]}
+  {:a #{2 3}} => #{[:a 3]})
+
+(comment "Semantics diff-remove"
+  "multiser after source (timed)"
+  #{1}     => #{}
+  #{1 2}   => #{}
+  #{1 2 3} => #{}
+  - timeout -
+  #{4}     => #{1 2 3}
+
+  "hash after source (timed)"
+  {:a #{1}}         => #{}
+  {:a #{1} :b #{1}} => #{}
+  - timeout -
+  {:c #{1}}         => #{[:a 1] [:b 1]}
+
+  "multiset after buffer (size 2)"
+  #{1}   => #{}
+  #{1 2} => #{}
+  #{2 3} => #{1}
+
+  "hash after buffer (size 2)"
+  {:a #{1}}   => #{}
+  {:a #{1 2}} => #{}
+  {:a #{2 3}} => #{[:a 1]})
+
 (comment "Semantics source with time-based leasing (10 seconds)"
   "multiset"
 
