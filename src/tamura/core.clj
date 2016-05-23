@@ -395,8 +395,6 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) :multiset)
-      (throw (Exception. "input to multiplicities must have multiset as return type")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-multiset)]
@@ -415,8 +413,6 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) :multiset)
-      (throw (Exception. "input to reduce must have multiset as return type")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-multiset)]
@@ -437,8 +433,6 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) :hash)
-      (throw (Exception. "input to reduce-by-key must have hash as return type")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-hash)]
@@ -577,8 +571,6 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) :hash)
-      (throw (Exception. "input to hash-to-multiset must be a hash")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-hash)]
@@ -597,8 +589,6 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) :multiset)
-      (throw (Exception. "input to map must be a multiset")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-multiset)]
@@ -617,8 +607,6 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) :hash)
-      (throw (Exception. "input to map-by-key must be a hash")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-hash)]
@@ -684,22 +672,29 @@
 
 (core/defn multiplicities
   [arg]
-  (if (v/signal? arg)
-    (let [input (v/value arg)
-          node (register-node! ::multiplicities :multiset [] [input])]
-      (make-signal node))
-    (throw (Exception. "argument to delay should be a signal"))))
+  (cond (not (v/signal? arg))
+        (throw (Exception. "argument to delay should be a signal"))
+        (= (:return-type (get-node (v/value arg))) :multiset)
+        (make-signal (register-node! ::multiplicities :multiset [] [(v/value arg)]))
+        :else
+        (throw (Exception. "input for multiplicities must be multiset"))))
 
 ;; NOTE: Because multisets have no order, the function must be both commutative and associative
 (core/defn reduce
   ([source f]
-   (if (not (v/signal? source))
-     (throw (Exception. "first argument to reduce should be a signal"))
-     (make-signal (register-node! ::reduce :multiset [f false] [(v/value source)]))))
+   (cond (not (v/signal? source))
+         (throw (Exception. "argument to reduce should be a signal"))
+         (= (:return-type (get-node (v/value source))) :multiset)
+         (make-signal (register-node! ::reduce :multiset [f false] [(v/value source)]))
+         :else
+         (throw (Exception. "input for reduce must be a multiset"))))
   ([source f val]
-   (if (not (v/signal? source))
-     (throw (Exception. "first argument to reduce should be a signal"))
-     (make-signal (register-node! ::reduce :multiset [f {:val val}] [(v/value source)])))))
+   (cond (not (v/signal? source))
+         (throw (Exception. "argument to reduce should be a signal"))
+         (= (:return-type (get-node (v/value source))) :multiset)
+         (make-signal (register-node! ::reduce :multiset [f {:val val}] [(v/value source)]))
+         :else
+         (throw (Exception. "input for reduce must be a multiset")))))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
 ;; nodes depend on a throttle signal and one or more other signals.
@@ -755,39 +750,57 @@
 ;; TODO: make sure size > buffer size of buffer or source?
 (core/defn filter-key-size
   [source size]
-  (if (not (v/signal? source))
-    (throw (Exception. "first argument to filter-key-size should be a signal"))
-    (make-signal (register-node! ::filter-key-size :hash [size] [(v/value source)]))))
+  (cond (not (v/signal? source))
+        (throw (Exception. "argument to filter-key-size should be a signal"))
+        (= (:return-type (get-node (v/value source))) :hash)
+        (make-signal (register-node! ::filter-key-size :hash [size] [(v/value source)]))
+        :else
+        (throw (Exception. "input for filter-key-size must be a hash"))))
 
 ;; NOTE: Because multisets have no order, the function must be both commutative and associative
 (core/defn reduce-by-key
   ([source f]
-   (if (not (v/signal? source))
-     (throw (Exception. "first argument to reduce-by-key should be a signal"))
-     (make-signal (register-node! ::reduce-by-key :hash [f false] [(v/value source)]))))
+   (cond (not (v/signal? source))
+         (throw (Exception. "argument to reduce-by-key should be a signal"))
+         (= (:return-type (get-node (v/value source))) :hash)
+         (make-signal (register-node! ::reduce-by-key :hash [f false] [(v/value source)]))
+         :else
+         (throw (Exception. "input for reduce-by-key must be a hash"))))
   ([source f val]
-   (if (not (v/signal? source))
-     (throw (Exception. "first argument to reduce-by-key should be a signal"))
-     (make-signal (register-node! ::reduce-by-key :hash [f {:val val}] [(v/value source)])))))
+   (cond (not (v/signal? source))
+         (throw (Exception. "argument to reduce-by-key should be a signal"))
+         (= (:return-type (get-node (v/value source))) :hash)
+         (make-signal (register-node! ::reduce-by-key :hash [f {:val val}] [(v/value source)]))
+         :else
+         (throw (Exception. "input for reduce-by-key must be a hash")))))
 
 (core/defn hash-to-multiset
   [source]
-  (if (not (v/signal? source))
-    (throw (Exception. "first argument to hash-to-multiset should be a signal"))
-    (make-signal (register-node! ::hash-to-multiset :multiset [] [(v/value source)]))))
+  (cond (not (v/signal? source))
+        (throw (Exception. "argument to hash-to-multiset should be a signal"))
+        (= (:return-type (get-node (v/value source))) :hash)
+        (make-signal (register-node! ::hash-to-multiset :multiset [] [(v/value source)]))
+        :else
+        (throw (Exception. "input for hash-to-multiset must be a hash"))))
 
 ;; TODO: like reduce, make it work for regular collections too
 (core/defn map
   [source f]
-  (if (v/signal? source)
-    (make-signal (register-node! ::map :multiset [f] [(v/value source)]))
-    (throw (Exception. "first argument to map should be a signal"))))
+  (cond (not (v/signal? source))
+        (throw (Exception. "argument to map should be a signal"))
+        (= (:return-type (get-node (v/value source))) :multiset)
+        (make-signal (register-node! ::map :multiset [f] [(v/value source)]))
+        :else
+        (throw (Exception. "input for map must be a multiset"))))
 
 (core/defn map-by-key
   [source f]
-  (if (v/signal? source)
-    (make-signal (register-node! ::map-by-key :hash [f] [(v/value source)]))
-    (throw (Exception. "first argument to map-by-key should be a signal"))))
+  (cond (not (v/signal? source))
+        (throw (Exception. "argument to map-by-key should be a signal"))
+        (= (:return-type (get-node (v/value source))) :multiset)
+        (make-signal (register-node! ::map-by-key :hash [f] [(v/value source)]))
+        :else
+        (throw (Exception. "input for map-by-key must be a hash"))))
 
 (defmacro print-signal
   [signal]
