@@ -596,7 +596,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::delay (:return-type input-node) sub-chan)))
+    (Node. id ::diff-add (:return-type input-node) sub-chan)))
 (register-constructor! ::diff-add make-diff-add-node)
 
 (core/defn make-diff-remove-node
@@ -616,7 +616,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::delay (:return-type input-node) sub-chan)))
+    (Node. id ::diff-remove (:return-type input-node) sub-chan)))
 (register-constructor! ::diff-remove make-diff-remove-node)
 
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
@@ -748,7 +748,7 @@
   (cond (not (v/signal? sig))
         (throw (Exception. "first argument to buffer should be a signal"))
         (= (:node-type (get-node (v/value sig))) ::source)
-        (make-signal (register-source! {:node-type ::buffer :args [size] :inputs [(v/value sig)]}))
+        (make-signal (register-node! {:node-type ::buffer :args [size] :inputs [(v/value sig)]}))
         :else (throw (Exception. "input for buffer node should be a source"))))
 
 (core/defn diff-add
@@ -756,7 +756,7 @@
   (cond (not (v/signal? sig))
         (throw (Exception. "first argument to diff-add should be a signal"))
         (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
-        (make-signal (register-source! {:node-type ::diff-add :inputs [(v/value sig)]}))
+        (make-signal (register-node! {:node-type ::diff-add :inputs [(v/value sig)]}))
         :else (throw (Exception. "input for diff-add node should be a source, buffer, or delay"))))
 
 (core/defn diff-remove
