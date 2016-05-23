@@ -631,18 +631,18 @@
 ;; TODO: error if key not present
 ;; TODO: maybe rename to redis-input
 (core/defn make-redis
-  [host queue & {:keys [key] :or {key false}}]
-  (let [node {:node-type ::source :args [(if key :hash :multiset) :key key]}
+  [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
+  (let [node {:node-type ::source :args [(if key :hash :multiset) :key key :buffer buffer :timeout timeout]}
         id (register-source! node)
         conn (Jedis. host)]
-    (threadloop [values (if key (make-hash) (make-multiset))]
+    (threadloop []
       (let [v (second (.blpop conn 0 (into-array String [queue])))
             parsed (edn/read-string v)
             value (if key
                     [(get parsed key) (dissoc parsed key)]
                     parsed)]
         (>!! (:in *coordinator*) {:destination id :value value})
-        (recur values)))
+        (recur)))
     (make-signal id)))
 (def redis make-redis)
 
