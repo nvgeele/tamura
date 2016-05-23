@@ -2,43 +2,20 @@
   (:require [clojure.core :as core]
             [clojure.core.async :as a :refer [>!! >! <!! <! go go-loop]]
             [clojure.core.match :refer [match]]
-            [clojure.data.priority-map :as pm]
             [clojure.edn :as edn]
-            [clojure.set :as cs]
             [clojure.string :refer [upper-case]]
             [clojure.tools.logging :as log]
-            [clj-time.core :as t]
             [multiset.core :as ms]
             [potemkin :as p]
-            [tamura.macros :as macros]
-            [tamura.values :as v]
-            [tamura.funcs :as funcs])
+            [tamura.values :as v])
   (:use [tamura.datastructures])
-  (:import [redis.clients.jedis Jedis JedisPool]
-           [java.util LinkedList]))
+  (:import [redis.clients.jedis Jedis]))
 
 (p/import-vars
   [tamura.macros
-
    def
    defn
-   defsig]
-
-  #_[tamura.funcs
-
-   map
-
-   ])
-
-(defmacro install
-  "Installs"
-  []
-  ;; Check if :lang :tamura in metadata?
-  ;; Overwrite eval?
-  ;; Overwrite macros?
-
-  (println "Installing tamura...")
-  nil)
+   defsig])
 
 ;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
 ;; each actor counts how many updates it receives, if updates = parents, then proceed
@@ -218,8 +195,6 @@
   `(let [f# (fn [] ~@body)]
      (swap! threads conj {:body f#})))
 
-;; (def t (Thread. (fn [] (loop [] (println "Ok") (Thread/sleep 3000) (recur)))))
-
 (defmacro threadloop
   [bindings & body]
   `(thread (loop ~bindings ~@body)))
@@ -256,8 +231,6 @@
 
         :else (recur (<! in) started? sources)))
     (Coordinator. in)))
-
-;; NOTE: nodes are currently semi-dynamic; subscribers can be added, but inputs not
 
 (core/defn subscribe-input
   [input]
