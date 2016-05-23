@@ -84,7 +84,18 @@
       (BufferedMultiSet. ms size buffer-list [] [])))
   (multiset-empty? [this]
     (multiset-empty? ms))
-  (multiset-insert-and-remove [this to-insert to-remove])
+  (multiset-insert-and-remove [this to-insert to-remove]
+    (let [[msi rmi] (reduce (fn [[ms removed] val]
+                              (let [ms (multiset-insert ms val)]
+                                [ms (concat removed (multiset-removed ms))]))
+                            [this []]
+                            to-insert)
+          [msr rmr] (reduce (fn [[ms removed] val]
+                              (let [ms (multiset-remove ms val)]
+                                [ms (concat removed (multiset-removed ms))]))
+                            [msi []]
+                            to-remove)]
+      (BufferedMultiSet. (.ms msr) size (.buffer-list msr) to-insert (concat rmi rmr))))
   (multiset-inserted [this]
     inserted)
   (multiset-removed [this]
@@ -119,7 +130,18 @@
       (TimedMultiSet. new-ms timeout new-pm [] (multiset-removed new-ms))))
   (multiset-empty? [this]
     (multiset-empty? ms))
-  (multiset-insert-and-remove [this to-insert to-remove])
+  (multiset-insert-and-remove [this to-insert to-remove]
+    (let [[msi rmi] (reduce (fn [[ms removed] val]
+                              (let [ms (multiset-insert ms val)]
+                                [ms (concat removed (multiset-removed ms))]))
+                            [this []]
+                            to-insert)
+          [msr rmr] (reduce (fn [[ms removed] val]
+                              (let [ms (multiset-remove ms val)]
+                                [ms (concat removed (multiset-removed ms))]))
+                            [msi []]
+                            to-remove)]
+      (TimedMultiSet. (.ms msr) timeout (.pm msr) to-insert (concat rmi rmr))))
   (multiset-inserted [this]
     inserted)
   (multiset-removed [this]
