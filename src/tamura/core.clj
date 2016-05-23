@@ -695,10 +695,7 @@
   (assert*
     (v/signal? sig) "first argument to buffer should be a signal"
     (= (:node-type (get-node (v/value sig))) ::source) "input for buffer node should be a source")
-  (make-signal (register-node! ::buffer
-                               (:return-type (get-node (v/value sig)))
-                               [size]
-                               [(v/value sig)])))
+  (make-signal (register-node! ::buffer (:return-type (get-node (v/value sig))) [size] [(v/value sig)])))
 
 (core/defn diff-add
   [sig]
@@ -706,10 +703,7 @@
     (v/signal? sig) "first argument to diff-add should be a signal"
     (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
     "input for diff-add node should be a source, buffer, or delay")
-  (make-signal (register-node! ::diff-add
-                               (:return-type (get-node (v/value sig)))
-                               []
-                               [(v/value sig)])))
+  (make-signal (register-node! ::diff-add (:return-type (get-node (v/value sig))) [] [(v/value sig)])))
 
 (core/defn diff-remove
   [sig]
@@ -717,10 +711,7 @@
     (v/signal? sig) "first argument to diff-remove should be a signal"
     (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
     "input for diff-remove node should be a source, buffer, or delay")
-  (make-signal (register-node! ::diff-remove
-                               (:return-type (get-node (v/value sig)))
-                               []
-                               [(v/value sig)])))
+  (make-signal (register-node! ::diff-remove (:return-type (get-node (v/value sig))) [] [(v/value sig)])))
 
 ;; TODO: make sure size > buffer size of buffer or source?
 (core/defn filter-key-size
