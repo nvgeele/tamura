@@ -705,6 +705,11 @@
   (if (v/signal? sig)
     (make-signal (register-source! {:node-type ::buffer :args [size] :inputs [(v/value sig)]}))
     (throw (Exception. "first argument to delay should be a signal"))))
+  (cond (not (v/signal? sig))
+        (throw (Exception. "first argument to buffer should be a signal"))
+        (= (:node-type (get-node (v/value sig))) ::source)
+        (make-signal (register-source! {:node-type ::buffer :args [size] :inputs [(v/value sig)]}))
+        :else (throw (Exception. "input for buffer node should be a source"))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous
