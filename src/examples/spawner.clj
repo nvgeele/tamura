@@ -1,12 +1,23 @@
 (ns examples.spawner
-  (:require [tamura.core :as t])
+  (:require [clj-time.core :as time])
   (:import [redis.clients.jedis JedisPool Jedis]))
+
+(defmacro thread
+  [& body]
+  `(doto (Thread. (fn [] ~@body))
+     (.start)))
+
+(defmacro threadloop
+  [bindings & body]
+  `(thread (loop ~bindings ~@body)))
 
 (defn spawn-thread
   [host queue id]
   (let [conn (Jedis. host)]
-    (t/threadloop []
-      (.rpush conn queue (into-array String [(str {:user-id id :position [(Math/random) (Math/random)]})]))
+    (threadloop []
+      (.rpush conn queue (into-array String [(str {:user-id id
+                                                   :position [(Math/random) (Math/random)]
+                                                   :time (time/now)})]))
       (Thread/sleep 1000)
       (recur))))
 
@@ -17,5 +28,5 @@
 
 (defn -main
   [& args]
-  (spawn-threads "localhost" "bxlqueue" 25)
+  (spawn-threads "localhost" "bxlqueue" 10)
   (println "Done!"))

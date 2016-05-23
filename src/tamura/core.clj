@@ -701,7 +701,7 @@
 ;; TODO: new filter
 ;; TODO: constant set
 ;; TODO: combine-latest
-;; TODO: sample
+;; TODO: sample-on
 ;; TODO: foldp
 
 (core/defn delay
@@ -809,32 +809,10 @@
     (make-signal (register-node! {:node-type ::map-by-key :args [f] :inputs [(v/value source)]}))
     (throw (Exception. "first argument to map-by-key should be a signal"))))
 
-;; TODO: previous (or is this delay? or do latch instead so we can chain?)
-(core/defn previous
-  [& args]
-  (throw (Exception. "TODO")))
-
 (defmacro print-signal
   [signal]
   `(do-apply #(locking *out* (println (quote ~signal) ": " %)) ~signal))
 
 (core/defn -main
   [& args]
-  (let [rh (make-redis "localhost" "tqh" :key :id)
-        delayed (delay rh)
-        zipped (zip rh delayed)
-        buffered (buffer rh 3)]
-    ;(print-signal rh)
-    ;(print-signal delayed)
-    ;(print-signal zipped)
-    (print-signal buffered)
-    )
-
-  (let [rms (make-redis "localhost" "tqms")
-        delayed (delay rms)
-        buffered (buffer rms 3)]
-    ;(print-signal rms)
-    ;(print-signal delayed)
-    (print-signal buffered))
-
   (println "Ready"))
