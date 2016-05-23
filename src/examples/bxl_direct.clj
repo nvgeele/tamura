@@ -40,19 +40,19 @@
 ;;;;;;;;;;;;;;;
 
 (defn spawn-thread
-  [id]
-  (let [conn (Jedis. redis-host)]
+  [host queue id]
+  (let [conn (Jedis. host)]
     (t/threadloop []
-      (.rpush conn redis-key (into-array String [(str {:user-id  id
-                                                       :position [(Math/random) (Math/random)]
-                                                       :time     (str (time/now))})]))
+      (.rpush conn queue (into-array String [(str {:user-id  id
+                                                   :position [(Math/random) (Math/random)]
+                                                   :time     (str (time/now))})]))
       (Thread/sleep 1000)
       (recur))))
 
 (defn spawn-threads
   [host queue num]
   (doseq [i (range 0 num)]
-    (spawn-thread i)))
+    (spawn-thread host queue i)))
 
 (.addShutdownHook (Runtime/getRuntime)
                   (Thread. (fn []
@@ -62,6 +62,6 @@
 
 (defn -main
   [& args]
-  (spawn-threads redis-host redis-key 10)
+  (spawn-threads redis-host redis-key 25)
   (t/start!)
   (println "Ready"))
