@@ -686,6 +686,26 @@
     (Node. id ::filter-key-size :hash sub-chan)))
 (register-constructor! ::filter-key-size make-filter-key-size-node)
 
+(core/defn make-hash-to-multiset-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (when-not (= (:return-type input-node) :hash)
+      (throw (Exception. "input to hash-to-multiset must be a hash")))
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-hash)]
+      (log/debug (str "hash-to-multiset node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (hash->multiset (:value msg))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::hash-to-multiset :multiset sub-chan)))
+(register-constructor! ::hash-to-multiset make-hash-to-multiset-node)
+
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
 (core/defn- make-signal
@@ -851,6 +871,12 @@
    (if (not (v/signal? source))
      (throw (Exception. "first argument to reduce-by-key should be a signal"))
      (make-signal (register-node! {:node-type ::reduce-by-key :args [f {:val val}] :inputs [(v/value source)]})))))
+
+(core/defn hash-to-multiset
+  [source]
+  (if (not (v/signal? source))
+    (throw (Exception. "first argument to hash-to-multiset should be a signal"))
+    (make-signal (register-node! {:node-type ::hash-to-multiset :inputs [(v/value source)]}))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous

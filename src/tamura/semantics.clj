@@ -184,6 +184,12 @@
   {:a #{1 2 3} :b #{1}}   => {:a #{5} :b #{0}}
   {:a #{1 2 3} :b #{1 2}} => {:a #{5} :b #{2}})
 
+(comment "Semantics for hash-to-multiset"
+  "hash"
+  {:a #{1}}           => #{[:a 1]}
+  {:a #{1} :b #{1}}   => #{[:a 1] [:b 1]}
+  {:a #{1 2} :b #{1}} => #{[:a 1] [:a 2] [:b 1]})
+
 (comment "Semantics source with time-based leasing (10 seconds)"
   "multiset"
 

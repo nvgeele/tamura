@@ -208,7 +208,8 @@
   (hash->set [h]))
 
 (defprotocol HashRegularOnly
-  (hash-reduce-by-key [this f] [this f initial]))
+  (hash-reduce-by-key [this f] [this f initial])
+  (hash->multiset [this]))
 
 (deftype HashImpl [hash init inserted removed]
   HashBasic
@@ -275,7 +276,13 @@
         (HashImpl. make-multiset [] [])))
   (hash-reduce-by-key [this f initial]
     (-> (reduce-kv #(assoc %1 %2 (multiset-reduce %3 f initial)) {} hash)
-        (HashImpl. make-multiset [] []))))
+        (HashImpl. make-multiset [] [])))
+  (hash->multiset [this]
+    (make-multiset (reduce (fn [acc [key ms]]
+                             (let [pairs (map vector (repeat key) (to-multiset ms))]
+                               (into acc pairs)))
+                           (ms/multiset)
+                           hash))))
 
 ;; TODO: write tests for remove etc
 ;; TODO: do we need to filter the pm in hash-remove ?

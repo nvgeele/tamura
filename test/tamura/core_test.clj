@@ -312,6 +312,12 @@
       (send-receive :b 1) => {:a (ms/multiset 5) :b (ms/multiset 0)}
       (send-receive :b 2) => {:a (ms/multiset 5) :b (ms/multiset 2)})))
 
+(facts "about hash-to-multiset"
+  (test-hash-node #(core/make-hash-to-multiset-node (core/new-id!) [] [%])
+    (send-receive* :a 1 :multiset) => (ms/multiset [:a 1])
+    (send-receive* :b 1 :multiset) => (ms/multiset [:a 1] [:b 1])
+    (send-receive* :b 2 :multiset) => (ms/multiset [:a 1] [:b 1] [:b 2])))
+
 ;; TODO: perform this test
 (comment
   (defn test-sorting
