@@ -522,26 +522,23 @@
 
 ;; TODO: test
 (core/defn make-reduce-node
-  ;;[id input-node f & initial]
-  [id [f & initial] [input-node]]
+  [id [f initial] [input-node]]
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
+    (when-not (= (:return-type input-node) :multiset)
+      (throw (Exception. "input to reduce must have multiset as return type")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-multiset)]
       (log/debug (str "reduce-node " id " has received: " msg))
       (if (:changed? msg)
-        (let [values (or (:hash (:value msg)) (:multiset (:value msg)))
-              reduced (if initial
-                        (if (>= (count values) 1) (reduce f (first initial) values) nil)
-                        (if (>= (count values) 2) (reduce f values) nil))
-              new-set (make-multiset (ms/multiset reduced))]
-          (doseq [sub @subscribers]
-            (>! sub {:changed? true :value new-set :from id}))
-          (recur (<! input) new-set))
-        (do (doseq [sub @subscribers]
-              (>! sub {:changed? false :value value :from id}))
+        (let [value (if initial
+                      (multiset-reduce (:value msg) f (:val initial))
+                      (multiset-reduce (:value msg) f))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (Node. id ::reduce :multiset sub-chan)))
 (register-constructor! ::reduce make-reduce-node)
@@ -843,15 +840,16 @@
       (make-signal node))
     (throw (Exception. "argument to delay should be a signal"))))
 
+;; NOTE: Because multisets have no order, the function must be both commutative and associative
 (core/defn reduce
-  ([f arg]
-   (if (v/signal? arg)
-     (make-signal (register-node! {:node-type ::reduce :args [f] :inputs [(v/value arg)]}))
-     (core/reduce f arg)))
-  ([f val coll]
-   (if (v/signal? coll)
-     (make-signal (register-node! {:node-type ::reduce :args [f val] :inputs [(v/value coll)]}))
-     (core/reduce f val coll))))
+  ([source f]
+   (if (not (v/signal? source))
+     (throw (Exception. "first argument to reduce should be a signal"))
+     (make-signal (register-node! {:node-type ::reduce :args [f false] :inputs [(v/value source)]}))))
+  ([source f val]
+   (if (not (v/signal? source))
+     (throw (Exception. "first argument to reduce should be a signal"))
+     (make-signal (register-node! {:node-type ::reduce :args [f {:val val}] :inputs [(v/value source)]})))))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
 ;; nodes depend on a throttle signal and one or more other signals.

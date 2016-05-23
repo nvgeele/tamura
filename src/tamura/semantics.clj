@@ -164,12 +164,27 @@
   {:a #{1 2} :b #{1 2}}   => {:a #{1 2} :b #{1 2}}
   {:a #{1 2} :b #{1 2 3}} => {:a #{1 2} :b #{1 2 3}})
 
-;; if hash is empty: empty hash
-;; if no initial and multiset empty: error (CAN NOT HAPPEN DUE TO SEMANTICS)
-;; if no initial but multiset size 1: return multiset
-;; if initial and multiset empty: initial
+(comment "Semantics for reduce, function (fn [a b] (+ a b))"
+  ;; multiset empty, no initial: empty multiset
+  ;; multiset empty, initial:    multiset with inital
+  ;; one element, no initial:    multiset with one element
+  "multiset (no initial)"
+  #{}      => #{}
+  #{1}     => #{1}
+  #{1 2}   => #{3}
+  #{1 2 3} => #{6}
+
+  "multiset (initial = -1)"
+  #{}      => #{-1}
+  #{1}     => #{0}
+  #{1 2}   => #{2}
+  #{1 2 3} => #{5})
 
 (comment "Semantics for reduce-by-key, function (fn [a b] (+ a b))"
+  ;; if hash is empty: empty hash
+  ;; if no initial and multiset empty: error (CAN NOT HAPPEN DUE TO SEMANTICS)
+  ;; if no initial but multiset size 1: return multiset
+  ;; if initial and multiset empty: initial
   "hash (no initial)"
   {:a #{1}}               => {:a #{1}}
   {:a #{1 2}}             => {:a #{3}}

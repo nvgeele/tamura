@@ -296,6 +296,18 @@
     (send-receive :b 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
     (send-receive :b 3) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2 3)}))
 
+(facts "about reduce, function (fn [a b] (+ a b))"
+  (facts "multiset (no initial)"
+    (test-multiset-node #(core/make-reduce-node (core/new-id!) [(fn [a b] (+ a b)) false] [%])
+      (send-receive 1) => (ms/multiset 1)
+      (send-receive 2) => (ms/multiset 3)
+      (send-receive 3) => (ms/multiset 6)))
+  (facts "multiset (initial = -1)"
+    (test-multiset-node #(core/make-reduce-node (core/new-id!) [(fn [a b] (+ a b)) {:val -1}] [%])
+      (send-receive 1) => (ms/multiset 0)
+      (send-receive 2) => (ms/multiset 2)
+      (send-receive 3) => (ms/multiset 5))))
+
 (facts "about reduce-by-key, function (fn [a b] (+ a b))"
   (facts "hash (no initial)"
     (test-hash-node #(core/make-reduce-by-key-node (core/new-id!) [(fn [a b] (+ a b)) false] [%])

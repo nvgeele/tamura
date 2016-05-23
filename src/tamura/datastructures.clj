@@ -72,13 +72,17 @@
     (-> (ms/union (.ms this) (.ms r))
         (RegularMultiSet. [] [])))
   (multiset-reduce [this f]
-    (-> (reduce f ms)
-        (ms/multiset)
-        (RegularMultiSet. [] [])))
+    (if (empty? ms)
+      (RegularMultiSet. (ms/multiset) [] [])
+      (-> (reduce f ms)
+          (ms/multiset)
+          (RegularMultiSet. [] []))))
   (multiset-reduce [this f initial]
-    (-> (reduce f initial ms)
-        (ms/multiset)
-        (RegularMultiSet. [] [])))
+    (if (empty? ms)
+      (RegularMultiSet. (ms/multiset initial) [] [])
+      (-> (reduce f initial ms)
+          (ms/multiset)
+          (RegularMultiSet. [] []))))
   (multiset-map [this f]
     (-> (apply ms/multiset (map f ms))
         (RegularMultiSet. [] [])))
