@@ -345,57 +345,6 @@
 ;; The rationale is that a node can only produce a :changed? true value iff all its inputs have been true at least once.
 ;; Possible solution: an inputs-seen flag of some sorts?
 
-;; TODO: construction finish detection
-;; TODO: test
-(core/defn make-map-hash-node
-  [id [f] [input-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)
-        selector (if (= (:return-type input-node) :hash) :hash :multiset)]
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<! input)
-              value (make-hash)]
-      (log/debug (str "map-to-hash-node " id " has received: " msg))
-      (if (:changed? msg)
-        (let [values (selector (:value msg))
-              new-hash (make-hash (reduce (fn [h v]
-                                            (let [[k v] (f v)]
-                                              (assoc h k v)))
-                                          {}
-                                          values))]
-          (doseq [sub @subscribers]
-            (>! sub {:changed? true :value new-hash :from id}))
-          (recur (<! input) new-hash))
-        (do (doseq [sub @subscribers]
-              (>! sub {:changed? false :value value :from id}))
-            (recur (<! input) value))))
-    (Node. id ::map-to-hash :hash sub-chan)))
-(register-constructor! ::map-to-hash make-map-hash-node)
-
-;; TODO: tests
-(core/defn make-map-multiset-node
-  [id [f] [input-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)
-        selector (if (= (:return-type input-node) :hash) :hash :multiset)]
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<! input)
-              value (make-multiset)]
-      (log/debug (str "map-to-multiset-node " id " has received: " msg))
-      (if (:changed? msg)
-        (let [values (selector (:value msg))
-              new-set (make-multiset (apply ms/multiset (core/map f values)))]
-          (doseq [sub @subscribers]
-            (>! sub {:changed? true :value new-set :from id}))
-          (recur (<! input) new-set))
-        (do (doseq [sub @subscribers]
-              (>! sub {:changed? false :value value :from id}))
-            (recur (<! input) value))))
-    (Node. id ::map-to-multiset :multiset sub-chan)))
-(register-constructor! ::map-to-multiset make-map-multiset-node)
-
 ;; TODO: tests
 (core/defn make-do-apply-node
   [id [action] input-nodes]
@@ -463,43 +412,6 @@
     (Node. id ::delay (:return-type input-node) sub-chan)))
 (register-constructor! ::delay make-delay-node)
 
-(core/defn make-zip-node
-  [id [] [left-node right-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        left-in (subscribe-input left-node)
-        right-in (subscribe-input right-node)]
-    (when-not (and (= (:return-type left-node) :hash)
-                   (= (:return-type right-node) :hash))
-      (throw (Exception. "inputs to zip must have hashes as return types")))
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [l (<! left-in)
-              r (<! right-in)
-              zipped (make-multiset)]
-      (log/debug (str "zip-node " id " has received: " [l r]))
-      (if (or (:changed? l) (:changed? r))
-        (let [lh (:value l)
-              rh (:value r)
-              lkeys (set (hash-keys lh))
-              rkeys (set (hash-keys rh))
-              in-both (cs/intersection lkeys rkeys)
-              hash (reduce (fn [h key]
-                             (assoc h
-                               key [(hash-get lh key) (hash-get rh key)]))
-                           {}
-                           in-both)
-              zipped (make-hash hash)]
-          (doseq [sub @subscribers]
-            (>! sub {:changed? true :value zipped :from id}))
-          (recur (<! left-in) (<! right-in) zipped))
-        (do (doseq [sub @subscribers]
-              (>! sub {:changed? false :value zipped :from id}))
-            (recur (<! left-in) (<! right-in) zipped))))
-    (Node. id ::zip :hash sub-chan)))
-(register-constructor! ::zip make-zip-node)
-
-;; TODO: output as a hash?
-;; TODO: test
 (core/defn make-multiplicities-node
   [id [] [input-node]]
   (let [sub-chan (chan)
@@ -520,7 +432,6 @@
     (Node. id ::multiplicities :multiset sub-chan)))
 (register-constructor! ::multiplicities make-multiplicities-node)
 
-;; TODO: test
 (core/defn make-reduce-node
   [id [f initial] [input-node]]
   (let [sub-chan (chan)
@@ -770,28 +681,6 @@
     (make-signal id)))
 (def redis make-redis)
 
-;; For incremental etc: keep dict of input => output for elements
-;; TODO: what if function changes key?
-;; Possible solution: prevent by comparing in and output, and make keychanges possible by special map function
-;; TODO: test
-(core/defn map-to-hash
-  [f arg]
-  (if (v/signal? arg)
-    (let [input (v/value arg)
-          node {:node-type ::map-to-hash :args [f] :inputs [input]}
-          id (register-node! node)]
-      (make-signal id))
-    (throw (Exception. "map-to-hash requires a signal as second argument"))))
-
-;; TODO: test
-(core/defn map-to-multiset
-  [f arg]
-  (if (v/signal? arg)
-    (let [input (v/value arg)
-          node (register-node! {:node-type ::map-to-multiset :args [f] :inputs [input]})]
-      (make-signal node))
-    (throw (Exception. "map-to-multiset requires a signal as second argument"))))
-
 ;; TODO: make this a sink
 (core/defn do-apply
   [f arg & args]
@@ -822,15 +711,6 @@
           node (register-node! {:node-type ::delay :args [] :inputs [input]})]
       (make-signal node))
     (throw (Exception. "argument to delay should be a signal"))))
-
-(core/defn zip
-  [left right]
-  (if (and (v/signal? left) (v/signal? right))
-    (let [left (v/value left)
-          right (v/value right)
-          node (register-node! {:node-type ::zip :args [] :inputs [left right]})]
-      (make-signal node))
-    (throw (Exception. "arguments to zip should be signals"))))
 
 (core/defn multiplicities
   [arg]
