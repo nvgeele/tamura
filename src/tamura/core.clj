@@ -375,7 +375,7 @@
 (core/defn make-do-apply-node
   [id [action] input-nodes]
   (let [inputs (subscribe-inputs input-nodes)
-        selectors (map #(if (= (:return-type %) :hash) :hash :multiset) input-nodes)]
+        selectors (map #(if (= (:return-type %) :hash) to-hash to-multiset) input-nodes)]
     (go-loop [msgs
               (map <!! inputs)
               #_(<! (first inputs))
