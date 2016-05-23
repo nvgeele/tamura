@@ -17,6 +17,7 @@
   (multiset-insert [this val])
   (multiset-remove [this val])
   (multiset-empty? [this])
+  (multiset-count [this])
   (multiset-insert-and-remove [this to-insert to-remove])
   (multiset-inserted [this])
   (multiset-removed [this])
@@ -41,6 +42,8 @@
       (RegularMultiSet. ms [] [])))
   (multiset-empty? [this]
     (empty? ms))
+  (multiset-count [this]
+    (count ms))
   (multiset-insert-and-remove [this to-insert to-remove]
     (let [to-remove (filter #(contains? ms %) to-remove)
           msi (reduce #(conj %1 %2) ms to-insert)
@@ -84,6 +87,8 @@
       (BufferedMultiSet. ms size buffer-list [] [])))
   (multiset-empty? [this]
     (multiset-empty? ms))
+  (multiset-count [this]
+    (multiset-count ms))
   (multiset-insert-and-remove [this to-insert to-remove]
     (let [[msi rmi] (reduce (fn [[ms removed] val]
                               (let [ms (multiset-insert ms val)]
@@ -130,6 +135,8 @@
       (TimedMultiSet. new-ms timeout new-pm [] (multiset-removed new-ms))))
   (multiset-empty? [this]
     (multiset-empty? ms))
+  (multiset-count [this]
+    (multiset-count ms))
   (multiset-insert-and-remove [this to-insert to-remove]
     (let [[msi rmi] (reduce (fn [[ms removed] val]
                               (let [ms (multiset-insert ms val)]
@@ -170,12 +177,14 @@
   (make-timed-multiset timeout (make-buffered-multiset size)))
 
 ;; TODO: hash-get-latest
+;; TODO: test for hash-filter-key-size
 (defprotocol HashBasic
   (hash-get [h key])
   (hash-insert [h key val])
   (hash-remove [h key])
   (hash-remove-element [h key val])
   (hash-insert-and-remove [this to-insert to-remove])
+  (hash-filter-key-size [this size])
   (hash-inserted [this])
   (hash-removed [this])
   (to-hash [h])
@@ -222,6 +231,9 @@
                            [hi []]
                            to-remove)]
       (HashImpl. (.hash hr) init to-insert (concat rmi rmr))))
+  (hash-filter-key-size [this size]
+    (-> (reduce-kv #(if (>= (multiset-count %3) size) (assoc %1 %2 %3) %1) {} hash)
+        (HashImpl. init [] [])))
   (hash-inserted [this]
     inserted)
   (hash-removed [this]
@@ -285,6 +297,10 @@
                            [hi []]
                            to-remove)]
       (TimedHash. (.hash hr) timeout (.pm hr) to-insert (concat rmi rmr))))
+  ;; TODO: perform expirations?
+  (hash-filter-key-size [this size]
+    (-> (reduce-kv #(if (>= (multiset-count %3) size) (assoc %1 %2 %3) %1) {} hash)
+        (TimedHash. timeout pm [] [])))
   (hash-inserted [this]
     inserted)
   (hash-removed [this]

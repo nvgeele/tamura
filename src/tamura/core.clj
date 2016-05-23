@@ -619,6 +619,26 @@
     (Node. id ::diff-remove (:return-type input-node) sub-chan)))
 (register-constructor! ::diff-remove make-diff-remove-node)
 
+(core/defn make-filter-key-size-node
+  [id [size] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (when-not (= (:return-type input-node) :hash)
+      (throw (Exception. "input to filter-key-size must be a hash")))
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-hash)]
+      (log/debug (str "filter-key-size node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (hash-filter-key-size (:value msg) size)]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::filter-key-size :hash sub-chan)))
+(register-constructor! ::filter-key-size make-filter-key-size-node)
+
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
 (core/defn- make-signal
@@ -764,8 +784,15 @@
   (cond (not (v/signal? sig))
         (throw (Exception. "first argument to diff-remove should be a signal"))
         (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
-        (make-signal (register-source! {:node-type ::diff-remove :inputs [(v/value sig)]}))
+        (make-signal (register-node! {:node-type ::diff-remove :inputs [(v/value sig)]}))
         :else (throw (Exception. "input for diff-remove node should be a source, buffer, or delay"))))
+
+;; TODO: make sure size > buffer size of buffer or source?
+(core/defn filter-key-size
+  [source size]
+  (if (not (v/signal? source))
+    (throw (Exception. "first argument to filter-key-size should be a signal"))
+    (make-signal (register-node! {:node-type ::filter-key-size :args [size] :inputs [(v/value source)]}))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous

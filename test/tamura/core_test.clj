@@ -288,6 +288,14 @@
     (send-receive 'b) => (ms/multiset ['a 1] ['b 1])
     (send-receive 'b) => (ms/multiset ['a 1] ['b 2])))
 
+(facts "about filter-key-size node (size 2)"
+  (test-hash-node #(core/make-filter-key-size-node (core/new-id!) [2] [%])
+    (send-receive :a 1) => {}
+    (send-receive :b 1) => {}
+    (send-receive :a 2) => {:a (ms/multiset 1 2)}
+    (send-receive :b 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
+    (send-receive :b 3) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2 3)}))
+
 ;; TODO: perform this test
 (comment
   (defn test-sorting

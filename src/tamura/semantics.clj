@@ -156,6 +156,14 @@
   {:a #{1 2}} => #{}
   {:a #{2 3}} => #{[:a 1]})
 
+(comment "Semantics for filter-key-size node (size 2)"
+  "hash"
+  {:a #{1}}               => {}
+  {:a #{1} :b #{1}}       => {}
+  {:a #{1 2} :b #{1}}     => {:a #{1 2}}
+  {:a #{1 2} :b #{1 2}}   => {:a #{1 2} :b #{1 2}}
+  {:a #{1 2} :b #{1 2 3}} => {:a #{1 2} :b #{1 2 3}})
+
 (comment "Semantics source with time-based leasing (10 seconds)"
   "multiset"
 
