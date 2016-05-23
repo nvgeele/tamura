@@ -68,9 +68,12 @@
    (send-receive [key val])))
 
 (defn send-receive*
-  [value return-type]
-  (send value)
-  (receive :return-type return-type))
+  ([value return-type]
+   (send value)
+   (receive :return-type return-type))
+  ([key value return-type]
+   (send [key value])
+   (receive :return-type return-type)))
 
 ;; TODO: capture test metadata
 (defn do-tests
@@ -231,10 +234,10 @@
       (send-receive 4) => (ms/multiset 4)))
   (facts "hash after source (timed)"
     (test-node :hash (t/seconds 2) false #(core/make-diff-add-node (core/new-id!) [] [%])
-      (send-receive* [:a 1] :multiset) => (ms/multiset [:a 1])
-      (send-receive* [:b 1] :multiset) => (ms/multiset [:b 1])
+      (send-receive* :a 1 :multiset) => (ms/multiset [:a 1])
+      (send-receive* :b 1 :multiset) => (ms/multiset [:b 1])
       (Thread/sleep 2100)
-      (send-receive* [:c 1] :multiset) => (ms/multiset [:c 1])))
+      (send-receive* :c 1 :multiset) => (ms/multiset [:c 1])))
   (facts "multiset after buffer (size 2)"
     (test-node :multiset false false
       #(let [buffer-node (core/make-buffer-node (core/new-id!) [2] [%])]
@@ -246,9 +249,9 @@
     (test-node :hash false false
       #(let [buffer-node (core/make-buffer-node (core/new-id!) [2] [%])]
         (core/make-diff-add-node (core/new-id!) [] [buffer-node]))
-      (send-receive* [:a 1] :multiset) => (ms/multiset [:a 1])
-      (send-receive* [:a 2] :multiset) => (ms/multiset [:a 2])
-      (send-receive* [:a 3] :multiset) => (ms/multiset [:a 3]))))
+      (send-receive* :a 1 :multiset) => (ms/multiset [:a 1])
+      (send-receive* :a 2 :multiset) => (ms/multiset [:a 2])
+      (send-receive* :a 3 :multiset) => (ms/multiset [:a 3]))))
 
 (facts "about diff-remove"
   (facts "multiset after source (timed)"
@@ -260,10 +263,10 @@
       (send-receive 4) => (ms/multiset 1 2 3)))
   (facts "hash after source (timed)"
     (test-node :hash (t/seconds 2) false #(core/make-diff-remove-node (core/new-id!) [] [%])
-      (send-receive* [:a 1] :multiset) => (ms/multiset)
-      (send-receive* [:b 1] :multiset) => (ms/multiset)
+      (send-receive* :a 1 :multiset) => (ms/multiset)
+      (send-receive* :b 1 :multiset) => (ms/multiset)
       (Thread/sleep 2100)
-      (send-receive* [:c 1] :multiset) => (ms/multiset [:a 1] [:b 1])))
+      (send-receive* :c 1 :multiset) => (ms/multiset [:a 1] [:b 1])))
   (facts "multiset after buffer (size 2)"
     (test-node :multiset false false
       #(let [buffer-node (core/make-buffer-node (core/new-id!) [2] [%])]
@@ -275,9 +278,9 @@
     (test-node :hash false false
       #(let [buffer-node (core/make-buffer-node (core/new-id!) [2] [%])]
         (core/make-diff-remove-node (core/new-id!) [] [buffer-node]))
-      (send-receive* [:a 1] :multiset) => (ms/multiset)
-      (send-receive* [:a 2] :multiset) => (ms/multiset)
-      (send-receive* [:a 3] :multiset) => (ms/multiset [:a 1]))))
+      (send-receive* :a 1 :multiset) => (ms/multiset)
+      (send-receive* :a 2 :multiset) => (ms/multiset)
+      (send-receive* :a 3 :multiset) => (ms/multiset [:a 1]))))
 
 (facts "about make-multiplicities-node"
   (test-multiset-node #(core/make-multiplicities-node (core/new-id!) [] [%])
