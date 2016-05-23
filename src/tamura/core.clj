@@ -592,7 +592,7 @@
       (if (:changed? msg)
         (let [inserted ((if hash? hash-inserted multiset-inserted) (:value msg))
               value (make-multiset (apply ms/multiset inserted))]
-          (send-subscribers @subscribers false value id)
+          (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
@@ -612,7 +612,7 @@
       (if (:changed? msg)
         (let [removed ((if hash? hash-removed multiset-removed) (:value msg))
               value (make-multiset (apply ms/multiset removed))]
-          (send-subscribers @subscribers false value id)
+          (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
