@@ -210,7 +210,18 @@
                    (dissoc hash key)
                    (assoc hash key new-items))
                  init [] removed)))
-  (hash-insert-and-remove [this to-insert to-remove])
+  (hash-insert-and-remove [this to-insert to-remove]
+    (let [[hi rmi] (reduce (fn [[h removed] [k v]]
+                             (let [h (hash-insert h k v)]
+                               [h (concat removed (hash-removed h))]))
+                           [this []]
+                           to-insert)
+          [hr rmr] (reduce (fn [[h removed] [k v]]
+                             (let [h (hash-remove-element h k v)]
+                               [h (concat removed (hash-removed h))]))
+                           [hi []]
+                           to-remove)]
+      (HashImpl. (.hash hr) init to-insert (concat rmi rmr))))
   (hash-inserted [this]
     inserted)
   (hash-removed [this]
@@ -262,7 +273,18 @@
     (let [hash (hash-remove-element hash key val)
           pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
       (TimedHash. hash timeout pm [] (hash-removed hash))))
-  (hash-insert-and-remove [this to-insert to-remove])
+  (hash-insert-and-remove [this to-insert to-remove]
+    (let [[hi rmi] (reduce (fn [[h removed] [k v]]
+                             (let [h (hash-insert h k v)]
+                               [h (concat removed (hash-removed h))]))
+                           [this []]
+                           to-insert)
+          [hr rmr] (reduce (fn [[h removed] [k v]]
+                             (let [h (hash-remove-element h k v)]
+                               [h (concat removed (hash-removed h))]))
+                           [hi []]
+                           to-remove)]
+      (TimedHash. (.hash hr) timeout (.pm hr) to-insert (concat rmi rmr))))
   (hash-inserted [this]
     inserted)
   (hash-removed [this]
