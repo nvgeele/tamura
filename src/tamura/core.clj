@@ -81,15 +81,6 @@
           (f (first l)) (recur (rest lst))
           :else false)))
 
-(defmacro thread
-  [& body]
-  `(doto (Thread. (fn [] ~@body))
-     (.start)))
-
-(defmacro threadloop
-  [bindings & body]
-  `(thread (loop ~bindings ~@body)))
-
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
 ;; TODO: let coordinator keep list of producers, so we can have something like (coordinator-start) to kick-start errting
@@ -115,13 +106,8 @@
 
 (def nodes (atom {}))
 (def sources (atom []))
+(def threads (atom []))
 (def node-constructors (atom {}))
-
-(core/defn reset-graph!
-  []
-  (swap! nodes (constantly {}))
-  (swap! sources (constantly []))
-  (swap! counter (constantly 0)))
 
 (core/defn register-node!
   [node]
@@ -187,14 +173,49 @@
     (a/close! c)
     s))
 
-(core/defn start
+(core/defn start!
   []
   (when (started?)
     (throw (Exception. "already started")))
   (build-nodes!)
+  (swap! threads #(doall (for [t %]
+                           (let [thread (Thread. (:body t))]
+                             (.start thread)
+                             (assoc t :thread thread)))))
   ;; TODO: remove the sleep...
   (Thread/sleep 1000)
   (>!! (:in *coordinator*) :start))
+
+;; TODO: way to kill goroutines (or can we rely on garbage collection?)
+(core/defn stop!
+  []
+  (when-not (started?)
+    (throw (Exception. "can not stop when not started")))
+  (swap! threads #(doall (for [t %]
+                           (do (.stop (:thread t))
+                               (dissoc t :thread)))))
+  (>!! (:in *coordinator*) :stop))
+
+(core/defn reset!
+  []
+  (when (started?)
+    (stop!))
+  (core/reset! nodes {})
+  (core/reset! sources [])
+  (core/reset! counter 0)
+  (core/reset! threads [])
+  (>!! (:in *coordinator*) :reset))
+
+(defmacro thread
+  [& body]
+  `(let [f# (fn [] ~@body)]
+     (swap! threads conj {:body f#})))
+
+;; (def t (Thread. (fn [] (loop [] (println "Ok") (Thread/sleep 3000) (recur)))))
+
+(defmacro threadloop
+  [bindings & body]
+  `(thread (loop ~bindings ~@body)))
 
 ;; TODO: phase2 of multiclock reactive programming (detect when construction is done) (or cheat and Thread/sleep)
 (core/defn make-coordinator
@@ -221,6 +242,10 @@
             (recur (<! in) started? sources))
 
         :start (recur (<! in) true sources)
+
+        :stop (recur (<! in) false [])
+
+        :reset (recur (<! in) false [])
 
         :else (recur (<! in) started? sources)))
     (Coordinator. in)))
