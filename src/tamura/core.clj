@@ -18,9 +18,6 @@
    defn
    defsig])
 
-;; intra-actor message: {:changed? false :value nil :origin nil :destination nil}
-;; each actor counts how many updates it receives, if updates = parents, then proceed
-
 (defmacro ^{:private true} assert-args
   [& pairs]
   `(do (when-not ~(first pairs)
@@ -29,6 +26,16 @@
        ~(let [more (nnext pairs)]
           (when more
             (list* `assert-args more)))))
+
+(defmacro ^{:private true} assert*
+  [& pairs]
+  (assert-args
+    (>= (count pairs) 2) "2 or more expressions in the body"
+    (even? (count pairs)) "an even amount of expressions")
+  `(do (assert ~(first pairs) ~(second pairs))
+       ~(let [more (nnext pairs)]
+          (when more
+            (list* `assert* more)))))
 
 (defmacro when-let*
   "bindings => [bindingform test ...]"
@@ -623,11 +630,11 @@
 ;; TODO: make this a sink
 (core/defn do-apply
   [f arg & args]
-  (if (andmap v/signal? (cons arg args))
-    (let [inputs (core/map v/value (cons arg args))
-          node (register-node! ::do-apply nil [f] inputs)]
-      (make-signal node))
-    (throw (Exception. "do-apply needs to be applied to signals"))))
+  (assert*
+    (andmap v/signal? (cons arg args)) "only signals from the second argument on")
+  (let [inputs (core/map v/value (cons arg args))
+        node (register-node! ::do-apply nil [f] inputs)]
+    (make-signal node)))
 
 ;; TODO: new filter
 ;; TODO: constant set
@@ -637,38 +644,32 @@
 
 (core/defn delay
   [arg]
-  (if (v/signal? arg)
-    (let [input (v/value arg)
-          return-type (:return-type (get-node input))
-          node (register-node! ::delay return-type [] [input])]
-      (make-signal node))
-    (throw (Exception. "argument to delay should be a signal"))))
+  (assert*
+    (v/signal? arg) "argument to delay should be a signal")
+  (let [input (v/value arg)
+        return-type (:return-type (get-node input))
+        node (register-node! ::delay return-type [] [input])]
+    (make-signal node)))
 
 (core/defn multiplicities
   [arg]
-  (cond (not (v/signal? arg))
-        (throw (Exception. "argument to delay should be a signal"))
-        (= (:return-type (get-node (v/value arg))) :multiset)
-        (make-signal (register-node! ::multiplicities :multiset [] [(v/value arg)]))
-        :else
-        (throw (Exception. "input for multiplicities must be multiset"))))
+  (assert*
+    (v/signal? arg) "argument to multiplicities should be a signal"
+    (= (:return-type (get-node (v/value arg))) :multiset) "input for multiplicities must be multiset")
+  (make-signal (register-node! ::multiplicities :multiset [] [(v/value arg)])))
 
 ;; NOTE: Because multisets have no order, the function must be both commutative and associative
 (core/defn reduce
   ([source f]
-   (cond (not (v/signal? source))
-         (throw (Exception. "argument to reduce should be a signal"))
-         (= (:return-type (get-node (v/value source))) :multiset)
-         (make-signal (register-node! ::reduce :multiset [f false] [(v/value source)]))
-         :else
-         (throw (Exception. "input for reduce must be a multiset"))))
+   (assert*
+     (v/signal? source) "argument to reduce should be a signal"
+     (= (:return-type (get-node (v/value source))) :multiset) "input for reduce must be a multiset")
+   (make-signal (register-node! ::reduce :multiset [f false] [(v/value source)])))
   ([source f val]
-   (cond (not (v/signal? source))
-         (throw (Exception. "argument to reduce should be a signal"))
-         (= (:return-type (get-node (v/value source))) :multiset)
-         (make-signal (register-node! ::reduce :multiset [f {:val val}] [(v/value source)]))
-         :else
-         (throw (Exception. "input for reduce must be a multiset")))))
+   (assert*
+     (v/signal? source) "argument to reduce should be a signal"
+     (= (:return-type (get-node (v/value source))) :multiset) "input for reduce must be a multiset")
+   (make-signal (register-node! ::reduce :multiset [f {:val val}] [(v/value source)]))))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
 ;; nodes depend on a throttle signal and one or more other signals.
@@ -676,105 +677,93 @@
 ;; TODO: what if the input hasn't changed next time we trigger? Do we still propagate a "change"?
 (core/defn throttle
   [signal ms]
-  (if (v/signal? signal)
-    (let [trigger (register-source! ::source :multiset [])
-          return-type (:return-type (get-node (v/value signal)))
-          node (register-node! ::throttle return-type [ms] [(v/value signal) trigger])]
-      (threadloop []
-        (Thread/sleep ms)
-        (>!! (:in *coordinator*) {:destination trigger :value nil})
-        (recur))
-      (make-signal node))
-    (throw (Exception. "first argument of throttle must be signal"))))
+  (assert*
+    (v/signal? signal) "first argument of throttle must be signal")
+  (let [trigger (register-source! ::source :multiset [])
+        return-type (:return-type (get-node (v/value signal)))
+        node (register-node! ::throttle return-type [ms] [(v/value signal) trigger])]
+    (threadloop []
+      (Thread/sleep ms)
+      (>!! (:in *coordinator*) {:destination trigger :value nil})
+      (recur))
+    (make-signal node)))
 
 ;; TODO: corner case size 0
+;; TODO: buffer after delay?
 (core/defn buffer
   [sig size]
-  (cond (not (v/signal? sig))
-        (throw (Exception. "first argument to buffer should be a signal"))
-        (= (:node-type (get-node (v/value sig))) ::source)
-        (make-signal (register-node! ::buffer
-                                     (:return-type (get-node (v/value sig)))
-                                     [size]
-                                     [(v/value sig)]))
-        :else (throw (Exception. "input for buffer node should be a source"))))
+  (assert*
+    (v/signal? sig) "first argument to buffer should be a signal"
+    (= (:node-type (get-node (v/value sig))) ::source) "input for buffer node should be a source")
+  (make-signal (register-node! ::buffer
+                               (:return-type (get-node (v/value sig)))
+                               [size]
+                               [(v/value sig)])))
 
 (core/defn diff-add
   [sig]
-  (cond (not (v/signal? sig))
-        (throw (Exception. "first argument to diff-add should be a signal"))
-        (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
-        (make-signal (register-node! ::diff-add
-                                     (:return-type (get-node (v/value sig)))
-                                     []
-                                     [(v/value sig)]))
-        :else (throw (Exception. "input for diff-add node should be a source, buffer, or delay"))))
+  (assert*
+    (v/signal? sig) "first argument to diff-add should be a signal"
+    (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+    "input for diff-add node should be a source, buffer, or delay")
+  (make-signal (register-node! ::diff-add
+                               (:return-type (get-node (v/value sig)))
+                               []
+                               [(v/value sig)])))
 
 (core/defn diff-remove
   [sig]
-  (cond (not (v/signal? sig))
-        (throw (Exception. "first argument to diff-remove should be a signal"))
-        (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
-        (make-signal (register-node! ::diff-remove
-                                     (:return-type (get-node (v/value sig)))
-                                     []
-                                     [(v/value sig)]))
-        :else (throw (Exception. "input for diff-remove node should be a source, buffer, or delay"))))
+  (assert*
+    (v/signal? sig) "first argument to diff-remove should be a signal"
+    (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+    "input for diff-remove node should be a source, buffer, or delay")
+  (make-signal (register-node! ::diff-remove
+                               (:return-type (get-node (v/value sig)))
+                               []
+                               [(v/value sig)])))
 
 ;; TODO: make sure size > buffer size of buffer or source?
 (core/defn filter-key-size
   [source size]
-  (cond (not (v/signal? source))
-        (throw (Exception. "argument to filter-key-size should be a signal"))
-        (= (:return-type (get-node (v/value source))) :hash)
-        (make-signal (register-node! ::filter-key-size :hash [size] [(v/value source)]))
-        :else
-        (throw (Exception. "input for filter-key-size must be a hash"))))
+  (assert*
+    (v/signal? source) "argument to filter-key-size should be a signal"
+    (= (:return-type (get-node (v/value source))) :hash) "input for filter-key-size must be a hash")
+  (make-signal (register-node! ::filter-key-size :hash [size] [(v/value source)])))
 
 ;; NOTE: Because multisets have no order, the function must be both commutative and associative
 (core/defn reduce-by-key
   ([source f]
-   (cond (not (v/signal? source))
-         (throw (Exception. "argument to reduce-by-key should be a signal"))
-         (= (:return-type (get-node (v/value source))) :hash)
-         (make-signal (register-node! ::reduce-by-key :hash [f false] [(v/value source)]))
-         :else
-         (throw (Exception. "input for reduce-by-key must be a hash"))))
+   (assert*
+     (v/signal? source) "argument to reduce-by-key should be a signal"
+     (= (:return-type (get-node (v/value source))) :hash) "input for reduce-by-key must be a hash")
+   (make-signal (register-node! ::reduce-by-key :hash [f false] [(v/value source)])))
   ([source f val]
-   (cond (not (v/signal? source))
-         (throw (Exception. "argument to reduce-by-key should be a signal"))
-         (= (:return-type (get-node (v/value source))) :hash)
-         (make-signal (register-node! ::reduce-by-key :hash [f {:val val}] [(v/value source)]))
-         :else
-         (throw (Exception. "input for reduce-by-key must be a hash")))))
+   (assert*
+     (v/signal? source) "argument to reduce-by-key should be a signal"
+     (= (:return-type (get-node (v/value source))) :hash) "input for reduce-by-key must be a hash")
+   (make-signal (register-node! ::reduce-by-key :hash [f {:val val}] [(v/value source)]))))
 
 (core/defn hash-to-multiset
   [source]
-  (cond (not (v/signal? source))
-        (throw (Exception. "argument to hash-to-multiset should be a signal"))
-        (= (:return-type (get-node (v/value source))) :hash)
-        (make-signal (register-node! ::hash-to-multiset :multiset [] [(v/value source)]))
-        :else
-        (throw (Exception. "input for hash-to-multiset must be a hash"))))
+  (assert*
+    (v/signal? source) "argument to hash-to-multiset should be a signal"
+    (= (:return-type (get-node (v/value source))) :hash) "input for hash-to-multiset must be a hash")
+  (make-signal (register-node! ::hash-to-multiset :multiset [] [(v/value source)])))
 
 ;; TODO: like reduce, make it work for regular collections too
 (core/defn map
   [source f]
-  (cond (not (v/signal? source))
-        (throw (Exception. "argument to map should be a signal"))
-        (= (:return-type (get-node (v/value source))) :multiset)
-        (make-signal (register-node! ::map :multiset [f] [(v/value source)]))
-        :else
-        (throw (Exception. "input for map must be a multiset"))))
+  (assert*
+    (v/signal? source) "argument to map should be a signal"
+    (= (:return-type (get-node (v/value source))) :multiset) "input for map must be a multiset")
+  (make-signal (register-node! ::map :multiset [f] [(v/value source)])))
 
 (core/defn map-by-key
   [source f]
-  (cond (not (v/signal? source))
-        (throw (Exception. "argument to map-by-key should be a signal"))
-        (= (:return-type (get-node (v/value source))) :multiset)
-        (make-signal (register-node! ::map-by-key :hash [f] [(v/value source)]))
-        :else
-        (throw (Exception. "input for map-by-key must be a hash"))))
+  (assert*
+    (v/signal? source) "argument to map-by-key should be a signal"
+    (= (:return-type (get-node (v/value source))) :multiset) "input for map-by-key must be a hash")
+  (make-signal (register-node! ::map-by-key :hash [f] [(v/value source)])))
 
 (defmacro print-signal
   [signal]
