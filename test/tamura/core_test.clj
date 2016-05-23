@@ -155,9 +155,9 @@
       (send-receive 3) => (ms/multiset 1 2)))
   (facts "hash"
     (test-hash-node #(core/make-delay-node (core/new-id!) [] [%])
-      (send-receive [:a 1]) => {}
-      (send-receive [:b 1]) => {:a (ms/multiset 1)}
-      (send-receive [:a 2]) => {:a (ms/multiset 1) :b (ms/multiset 1)}))
+      (send-receive :a 1) => {}
+      (send-receive :b 1) => {:a (ms/multiset 1)}
+      (send-receive :a 2) => {:a (ms/multiset 1) :b (ms/multiset 1)}))
   (facts "about delay after leased and buffered node"
     (facts "multiset (buffer size 3)"
       (test-node :multiset (t/seconds 2) 3 #(core/make-delay-node (core/new-id!) [] [%])
@@ -171,15 +171,15 @@
         (send-receive 7) => (ms/multiset 6)))
     (facts "hash (buffer size 2)"
       (test-node :hash (t/seconds 2) 2 #(core/make-delay-node (core/new-id!) [] [%])
-        (send-receive [:a 1]) => {}
-        (send-receive [:a 2]) => {:a (ms/multiset 1)}
+        (send-receive :a 1) => {}
+        (send-receive :a 2) => {:a (ms/multiset 1)}
         (Thread/sleep 1000)
-        (send-receive [:b 1]) => {:a (ms/multiset 1 2)}
-        (send-receive [:b 2]) => {:a (ms/multiset 1 2) :b (ms/multiset 1)}
+        (send-receive :b 1) => {:a (ms/multiset 1 2)}
+        (send-receive :b 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1)}
         (Thread/sleep 1100)
-        (send-receive [:c 1]) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
-        (send-receive [:a 3]) => {:b (ms/multiset 1 2) :c (ms/multiset 1)}
-        (send-receive [:b 3]) => {:b (ms/multiset 1 2) :c (ms/multiset 1) :a (ms/multiset 3)}))))
+        (send-receive :c 1) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
+        (send-receive :a 3) => {:b (ms/multiset 1 2) :c (ms/multiset 1)}
+        (send-receive :b 3) => {:b (ms/multiset 1 2) :c (ms/multiset 1) :a (ms/multiset 3)}))))
 
 ;; TODO: tests for delay after buffer?
 ;; TODO: tests for buffer after delay?
@@ -192,10 +192,10 @@
       (send-receive 4) => (ms/multiset 3 4)))
   (facts "hash"
     (test-hash-node #(core/make-buffer-node (core/new-id!) [2] [%])
-      (send-receive [:a 1]) => {:a (ms/multiset 1)}
-      (send-receive [:a 2]) => {:a (ms/multiset 1 2)}
-      (send-receive [:a 3]) => {:a (ms/multiset 2 3)}
-      (send-receive [:a 4]) => {:a (ms/multiset 3 4)}))
+      (send-receive :a 1) => {:a (ms/multiset 1)}
+      (send-receive :a 2) => {:a (ms/multiset 1 2)}
+      (send-receive :a 3) => {:a (ms/multiset 2 3)}
+      (send-receive :a 4) => {:a (ms/multiset 3 4)}))
   (facts "about buffer after leased and buffered node"
     (facts "multiset (source buffer size 3)"
       (test-node :multiset (t/seconds 2) 3 #(core/make-buffer-node (core/new-id!) [2] [%])
@@ -213,13 +213,13 @@
         (send-receive 4) => (ms/multiset 3 4)))
     (facts "hash (source buffer size 3)"
       (test-node :hash (t/seconds 2) 3 #(core/make-buffer-node (core/new-id!) [2] [%])
-        (send-receive [:a 1]) => {:a (ms/multiset 1)}
-        (send-receive [:a 2]) => {:a (ms/multiset 1 2)}
-        (send-receive [:a 3]) => {:a (ms/multiset 2 3)}
-        (send-receive [:b 1]) => {:a (ms/multiset 2 3) :b (ms/multiset 1)}
+        (send-receive :a 1) => {:a (ms/multiset 1)}
+        (send-receive :a 2) => {:a (ms/multiset 1 2)}
+        (send-receive :a 3) => {:a (ms/multiset 2 3)}
+        (send-receive :b 1) => {:a (ms/multiset 2 3) :b (ms/multiset 1)}
         (Thread/sleep 2100)
-        (send-receive [:d 1]) => {:d (ms/multiset 1)}
-        (send-receive [:e 1]) => {:d (ms/multiset 1) :e (ms/multiset 1)}))))
+        (send-receive :d 1) => {:d (ms/multiset 1)}
+        (send-receive :e 1) => {:d (ms/multiset 1) :e (ms/multiset 1)}))))
 
 (facts "about diff-add"
   (facts "multiset after source (timed)"
