@@ -164,6 +164,26 @@
   {:a #{1 2} :b #{1 2}}   => {:a #{1 2} :b #{1 2}}
   {:a #{1 2} :b #{1 2 3}} => {:a #{1 2} :b #{1 2 3}})
 
+;; if hash is empty: empty hash
+;; if no initial and multiset empty: error (CAN NOT HAPPEN DUE TO SEMANTICS)
+;; if no initial but multiset size 1: return multiset
+;; if initial and multiset empty: initial
+
+(comment "Semantics for reduce-by-key, function (fn [a b] (+ a b))"
+  "hash (no initial)"
+  {:a #{1}}               => {:a #{1}}
+  {:a #{1 2}}             => {:a #{3}}
+  {:a #{1 2 3}}           => {:a #{6}}
+  {:a #{1 2 3} :b #{1}}   => {:a #{6} :b #{1}}
+  {:a #{1 2 3} :b #{1 2}} => {:a #{6} :b #{3}}
+
+  "hash (initial = -1)"
+  {:a #{1}}               => {:a #{0}}
+  {:a #{1 2}}             => {:a #{2}}
+  {:a #{1 2 3}}           => {:a #{5}}
+  {:a #{1 2 3} :b #{1}}   => {:a #{5} :b #{0}}
+  {:a #{1 2 3} :b #{1 2}} => {:a #{5} :b #{2}})
+
 (comment "Semantics source with time-based leasing (10 seconds)"
   "multiset"
 

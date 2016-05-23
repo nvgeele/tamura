@@ -546,6 +546,28 @@
     (Node. id ::reduce :multiset sub-chan)))
 (register-constructor! ::reduce make-reduce-node)
 
+(core/defn make-reduce-by-key-node
+  [id [f initial] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (when-not (= (:return-type input-node) :hash)
+      (throw (Exception. "input to reduce-by-key must have hash as return type")))
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-hash)]
+      (log/debug (str "reduce-by-key-node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [reduced (if initial
+                        (hash-reduce-by-key (:value msg) f (:val initial))
+                        (hash-reduce-by-key (:value msg) f))]
+          (send-subscribers @subscribers true reduced id)
+          (recur (<! input) reduced))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::reduce-by-key :hash sub-chan)))
+(register-constructor! ::reduce-by-key make-reduce-by-key-node)
+
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
 ;; The reason for this is that if we would not do this, the buffer for the trigger channel would fill up,
 ;; until the source node(s) for the input-channel produce a value and the trigger channel would be emptied.
@@ -818,6 +840,17 @@
   (if (not (v/signal? source))
     (throw (Exception. "first argument to filter-key-size should be a signal"))
     (make-signal (register-node! {:node-type ::filter-key-size :args [size] :inputs [(v/value source)]}))))
+
+;; NOTE: Because multisets have no order, the function must be both commutative and associative
+(core/defn reduce-by-key
+  ([source f]
+   (if (not (v/signal? source))
+     (throw (Exception. "first argument to reduce-by-key should be a signal"))
+     (make-signal (register-node! {:node-type ::reduce-by-key :args [f false] :inputs [(v/value source)]}))))
+  ([source f val]
+   (if (not (v/signal? source))
+     (throw (Exception. "first argument to reduce-by-key should be a signal"))
+     (make-signal (register-node! {:node-type ::reduce-by-key :args [f {:val val}] :inputs [(v/value source)]})))))
 
 ;; TODO: previous (or is this delay? or do latch instead so we can chain?)
 (core/defn previous

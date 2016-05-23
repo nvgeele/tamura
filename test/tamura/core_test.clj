@@ -296,6 +296,22 @@
     (send-receive :b 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
     (send-receive :b 3) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2 3)}))
 
+(facts "about reduce-by-key, function (fn [a b] (+ a b))"
+  (facts "hash (no initial)"
+    (test-hash-node #(core/make-reduce-by-key-node (core/new-id!) [(fn [a b] (+ a b)) false] [%])
+      (send-receive :a 1) => {:a (ms/multiset 1)}
+      (send-receive :a 2) => {:a (ms/multiset 3)}
+      (send-receive :a 3) => {:a (ms/multiset 6)}
+      (send-receive :b 1) => {:a (ms/multiset 6) :b (ms/multiset 1)}
+      (send-receive :b 2) => {:a (ms/multiset 6) :b (ms/multiset 3)}))
+  (facts "hash (initial = -1)"
+    (test-hash-node #(core/make-reduce-by-key-node (core/new-id!) [(fn [a b] (+ a b)) {:val -1}] [%])
+      (send-receive :a 1) => {:a (ms/multiset 0)}
+      (send-receive :a 2) => {:a (ms/multiset 2)}
+      (send-receive :a 3) => {:a (ms/multiset 5)}
+      (send-receive :b 1) => {:a (ms/multiset 5) :b (ms/multiset 0)}
+      (send-receive :b 2) => {:a (ms/multiset 5) :b (ms/multiset 2)})))
+
 ;; TODO: perform this test
 (comment
   (defn test-sorting
