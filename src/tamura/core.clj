@@ -532,8 +532,6 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
-    (when-not (= (:return-type input-node) :hash)
-      (throw (Exception. "input to filter-key-size must be a hash")))
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (make-hash)]
