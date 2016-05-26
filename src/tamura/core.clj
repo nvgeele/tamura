@@ -175,7 +175,8 @@
                            (let [thread (Thread. (:body t))]
                              (.start thread)
                              (assoc t :thread thread)))))
-  ;; TODO: remove the sleep...
+  ;; TODO: remove sleep?
+  ;; NOTE: we wait one second to ensure all nodes had time to subscribe
   (Thread/sleep 1000)
   (>!! (:in *coordinator*) :start))
 
@@ -671,11 +672,9 @@
         node (register-node! ::do-apply nil [f] inputs)]
     (make-signal node)))
 
-;; TODO: new filter
 ;; TODO: constant set
 ;; TODO: combine-latest
 ;; TODO: sample-on
-;; TODO: foldp
 
 (core/defn delay
   [arg]
