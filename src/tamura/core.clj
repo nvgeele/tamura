@@ -148,7 +148,8 @@
             inputs (core/map #(:node (get @nodes %)) (:inputs node))
             node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)]
         (swap! nodes update-in [id :node] (constantly node-obj))
-        (if (= (:node-type node) ::source)
+        (if (or (= (:node-type node) ::source)
+                (contains? (ancestors (:node-type node)) ::source))
           (>!! (:in *coordinator*) {:new-source (:in node-obj)})
           (>!! (:in *coordinator*) :else))
         (recur (rest sorted))))))
@@ -728,14 +729,17 @@
   [sig size]
   (assert*
     (v/signal? sig) "first argument to buffer should be a signal"
-    (= (:node-type (get-node (v/value sig))) ::source) "input for buffer node should be a source")
+    (or (= (:node-type (get-node (v/value sig))) ::source)
+        (contains? (ancestors (:node-type (get-node (v/value sig)))) ::source))
+    "input for buffer node should be a source")
   (make-signal (register-node! ::buffer (:return-type (get-node (v/value sig))) [size] [(v/value sig)])))
 
 (core/defn diff-add
   [sig]
   (assert*
     (v/signal? sig) "first argument to diff-add should be a signal"
-    (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+    (or (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+        (contains? (ancestors (:node-type (get-node (v/value sig)))) ::source))
     "input for diff-add node should be a source, buffer, or delay")
   (make-signal (register-node! ::diff-add (:return-type (get-node (v/value sig))) [] [(v/value sig)])))
 
@@ -743,7 +747,8 @@
   [sig]
   (assert*
     (v/signal? sig) "first argument to diff-remove should be a signal"
-    (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+    (or (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
+        (contains? (ancestors (:node-type (get-node (v/value sig)))) ::source))
     "input for diff-remove node should be a source, buffer, or delay")
   (make-signal (register-node! ::diff-remove (:return-type (get-node (v/value sig))) [] [(v/value sig)])))
 
