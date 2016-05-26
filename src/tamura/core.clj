@@ -807,7 +807,7 @@
   [source f]
   (assert*
     (v/signal? source) "argument to filter-by-key should be a signal"
-    (= (:return-type (get-node (v/value source))) :multiset) "input for filter-by-key must be a hash")
+    (= (:return-type (get-node (v/value source))) :hash) "input for filter-by-key must be a hash")
   (make-signal (register-node! ::filter-by-key :hash [f] [(v/value source)])))
 
 (defmacro print-signal
