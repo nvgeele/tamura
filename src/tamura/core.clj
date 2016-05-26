@@ -337,7 +337,6 @@
             value (if key
                     [(get parsed key) (dissoc parsed key)]
                     parsed)]
-        (println "Redis input received:" value)
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur)))
     source-node))
