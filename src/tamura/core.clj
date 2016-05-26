@@ -713,7 +713,7 @@
   [signal ms]
   (assert*
     (v/signal? signal) "first argument of throttle must be signal")
-  (let [trigger (register-source! ::source :multiset [])
+  (let [trigger (register-source! ::source :multiset [:multiset])
         return-type (:return-type (get-node (v/value signal)))
         node (register-node! ::throttle return-type [ms] [(v/value signal) trigger])]
     (threadloop []
