@@ -27,7 +27,7 @@
           (when more
             (list* `assert-args more)))))
 
-(defmacro ^{:private true} assert*
+(defmacro assert*
   [& pairs]
   (assert-args
     (>= (count pairs) 2) "2 or more expressions in the body"
@@ -94,6 +94,7 @@
 (def threads (atom []))
 (def node-constructors (atom {}))
 
+;; TODO: check that inputs aren't sinks?
 (core/defn register-node!
   [node-type return-type args inputs]
   (let [id (new-id!)
@@ -114,6 +115,18 @@
               :args args}]
     (swap! sources conj id)
     (swap! nodes assoc id node)
+    id))
+
+(core/defn register-sink!
+  [node-type args inputs]
+  (let [id (new-id!)
+        node {:node-type node-type
+              :args args
+              :inputs inputs
+              :sink? true}]
+    (swap! nodes assoc id node)
+    (doseq [input-id inputs]
+      (swap! nodes update-in [input-id :outputs] conj id))
     id))
 
 (core/defn get-node
@@ -139,6 +152,7 @@
               (recur (rest roots))))))))
 
 ;; TODO: maybe write some tests?
+;; TODO: check here that inputs aren't sinks?
 (core/defn build-nodes! []
   (loop [sorted (sort-nodes)]
     (if (empty? sorted)
@@ -815,9 +829,31 @@
     (= (:return-type (get-node (v/value source))) :hash) "input for filter-by-key must be a hash")
   (make-signal (register-node! ::filter-by-key :hash [f] [(v/value source)])))
 
+(core/defn make-print-signal-node
+  [id [signal-text] [input]]
+  (make-do-apply-node id [#(locking *out* (println signal-text ":" %))] [input]))
+(register-constructor! ::print-signal make-print-signal-node)
+
 (defmacro print-signal
   [signal]
-  `(do-apply #(locking *out* (println (quote ~signal) ": " %)) ~signal))
+  ;; trick to capture the private make-signal and avoid violations
+  (let [k make-signal]
+    `(do
+       (let [sig# ~signal]
+         (assert*
+           (v/signal? sig#) "argument to print-signal should be a signal")
+         (~k (register-sink! ::print-signal [(quote ~signal)] [(v/value sig#)]))))))
+
+(comment
+  (core/defn print-signal
+    [signal]
+    (assert*
+      (v/signal? signal) "argument to print-signal should be a signal")
+    (make-signal (register-sink! ::print-signal [signal-text] [(v/value signal)])))
+
+  (defmacro print-signal
+    [signal]
+    `(do-apply #(locking *out* (println (quote ~signal) ": " %)) ~signal)))
 
 (core/defn -main
   [& args]
