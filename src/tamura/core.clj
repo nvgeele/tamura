@@ -327,6 +327,23 @@
     (Source. id ::source return-type in in)))
 (register-constructor! ::source make-source-node)
 
+(core/defn make-redis-node
+  [id [return-type host queue key buffer timeout] []]
+  (let [source-node (make-source-node id [return-type :timeout timeout :buffer buffer] [])
+        conn (Jedis. host)]
+    (threadloop []
+      (let [v (second (.blpop conn 0 (into-array String [queue])))
+            parsed (edn/read-string v)
+            value (if key
+                    [(get parsed key) (dissoc parsed key)]
+                    parsed)]
+        (println "Redis input received:" value)
+        (>!! (:in *coordinator*) {:destination id :value value})
+        (recur)))
+    source-node))
+(register-constructor! ::redis make-redis-node)
+(derive ::redis ::source)
+
 ;; input nodes = the actual node records
 ;; inputs = input channels
 ;; subscribers = atom with list of subscriber channels
@@ -648,20 +665,10 @@
 ;; TODO: something something polling time
 ;; TODO: error if key not present
 ;; TODO: maybe rename to redis-input
-(core/defn make-redis
+(core/defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
-  (let [id (register-source! ::source (if key :hash :multiset) [:key key :buffer buffer :timeout timeout])
-        conn (Jedis. host)]
-    (threadloop []
-      (let [v (second (.blpop conn 0 (into-array String [queue])))
-            parsed (edn/read-string v)
-            value (if key
-                    [(get parsed key) (dissoc parsed key)]
-                    parsed)]
-        (>!! (:in *coordinator*) {:destination id :value value})
-        (recur)))
-    (make-signal id)))
-(def redis make-redis)
+  (let [return-type (if key :hash :multiset)]
+    (make-signal (register-source! ::redis return-type [return-type host queue key buffer timeout]))))
 
 ;; TODO: make this a sink
 (core/defn do-apply
