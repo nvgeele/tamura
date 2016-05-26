@@ -17,10 +17,26 @@
                  [midje "1.8.3"]
                  [org.clojars.achim/multiset "0.1.0"]
                  [potemkin "0.4.3"]
-                 [redis.clients/jedis "2.8.0"]]
+                 [redis.clients/jedis "2.8.0"]
+
+                 [org.apache.spark/spark-core_2.10 "1.6.1"]
+                 [yieldbot/flambo "0.7.1"]
+                 [gorillalabs/sparkling "1.2.5"]
+
+                 ]
 
   ;:injections [(require 'tamura.core)
   ;             (tamura.core/install)]
+
+  ;; https://github.com/technomancy/leiningen/blob/master/doc/MIXED_PROJECTS.md
+  :source-paths      ["src/clojure"]
+  :java-source-paths ["src/java"]
+
+  :profiles {:dev
+             {:aot [
+                    ;examples.spark-compile
+                    examples.sparkling
+                    ]}}
 
   :main ^:skip-aot tamura.core
 
