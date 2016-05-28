@@ -15,14 +15,6 @@
   (:import [examples RedisReceiver]
            (org.apache.spark.streaming StateSpec)))
 
-(def sc (-> (conf/spark-conf)
-            (conf/master "local[2]")
-            (conf/app-name "flame_princess")
-            (f/spark-context)))
-(def ssc (fs/streaming-context sc 1000))
-
-(fs/checkpoint ssc "/tmp/checkpoint")
-
 (gen-class
   :name examples.MapFun
   :implements [org.apache.spark.api.java.function.Function3]
@@ -95,6 +87,8 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
+;; Passing an initial value to FlatMapFun is a trick to deal with the fact that reduce in Spark Streaming
+;; does not take an initial value...
 (defn reduce-by-key
   ([input-stream function]
    (-> (.flatMapToPair input-stream (examples.FlatMapFun.))
@@ -104,6 +98,15 @@
    (-> (.flatMapToPair input-stream (examples.FlatMapFun. initial))
        (fs/reduce-by-key function)
        (.groupByKey))))
+
+(defn hash-to-multiset
+  [input]
+  (-> (.flatMapToPair input (examples.FlatMapFun.))
+      (fs/map (f/fn [t] [(._1 t) (._2 t)]))))
+
+(defn map*
+  [input f]
+  (fs/map input f))
 
 (comment
   (-> (t/redis redis-host redis-key :key :user-id :buffer 2)
@@ -144,6 +147,14 @@
   lpush kaka "{:user-id 1, :position [0.018471146703515684 0.07674546533119342], :time \"2016-05-28T14:49:51.387Z\"}" "{:user-id 2, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}"
   )
 
+(def sc (-> (conf/spark-conf)
+            (conf/master "local[2]")
+            (conf/app-name "flame_princess")
+            (f/spark-context)))
+(def ssc (fs/streaming-context sc 1000))
+
+(fs/checkpoint ssc "/tmp/checkpoint")
+
 (defn redis
   [host queue id]
   (-> (.receiverStream ssc (RedisReceiver. host queue))
@@ -152,6 +163,14 @@
       (.mapWithState (StateSpec/function (examples.MapFun.)))
       (.stateSnapshots)))
 
+;; TODO: deal with singleton multisets!
+(defn multiplicities
+  [input-stream]
+  (-> (fs/map input-stream #(assoc {} % 1))
+      (.reduce (fn/function2 #(merge-with + %1 %2)))
+      (fs/flat-map vec)))
+
+;; TODO: buffering
 (defn -main
   [& args]
   (let [complete (redis "localhost" "kaka" :user-id)
@@ -164,17 +183,18 @@
                                     (if (time/before? t1 t2)
                                       (calculate-direction (:position %2) (:position %1))
                                       (calculate-direction (:position %1) (:position %2)))))
+        multiset (hash-to-multiset directions)
+        directions* (map* multiset second)
+        counts (multiplicities directions*)
         ]
 
-    ;(.print input-pairs)
-    ;(println (type pairs))
-    ;(.print (.count complete))
     ;(.print complete)
-    ;(.print pairs)
-    ;(.print (fs/reduce-by-key pairs (f/fn [x y] {:v (+ (:v x) (:v y))})))
-    (.print directions)
+    ;(.print filtered-on-size)
+    ;(.print directions)
+    ;(.print multiset)
+    ;(.print directions*)
+    (.print counts)
 
-    )
 
-  (.start ssc)
-  (.awaitTermination ssc))
+    (.start ssc)
+    (.awaitTermination ssc)))
