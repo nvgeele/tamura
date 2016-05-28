@@ -66,6 +66,15 @@
       mapped)))
 
 (gen-class
+  :name examples.FlatMapMultisetSource
+  :implements [org.apache.spark.api.java.function.PairFlatMapFunction]
+  :prefix "flatmapms-")
+
+(defn flatmapms-call
+  [this val]
+  (._2 val))
+
+(gen-class
   :name examples.FilterKeySizeFunction
   :implements [org.apache.spark.api.java.function.Function]
   :state state
@@ -172,18 +181,21 @@
 (fs/checkpoint ssc "/tmp/checkpoint")
 
 (defn redis
-  ([host queue id]
-   (-> (.receiverStream ssc (RedisReceiver. host queue))
-       (fs/map-to-pair (f/fn [str] (let [m (edn/read-string str)]
-                                     (ft/tuple (get m id) (dissoc m id)))))
-       (.mapWithState (StateSpec/function (examples.MapFun.)))
-       (.stateSnapshots)))
-  ([host queue id buffer-size]
-    (-> (.receiverStream ssc (RedisReceiver. host queue))
-        (fs/map-to-pair (f/fn [str] (let [m (edn/read-string str)]
-                                      (ft/tuple (get m id) (dissoc m id)))))
-        (.mapWithState (StateSpec/function (examples.MapFun. buffer-size)))
-        (.stateSnapshots))))
+  [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
+  (let [receiver (.receiverStream ssc (RedisReceiver. host queue))]
+    (if key
+      (-> (fs/map-to-pair receiver (f/fn [str] (let [m (edn/read-string str)]
+                                                 (ft/tuple (get m key) (dissoc m key)))))
+          (.mapWithState (StateSpec/function (if buffer
+                                               (examples.MapFun. buffer)
+                                               (examples.MapFun.))))
+          (.stateSnapshots))
+      (-> (fs/map-to-pair receiver #(ft/tuple 0 (edn/read-string %)))
+          (.mapWithState (StateSpec/function (if buffer
+                                               (examples.MapFun. buffer)
+                                               (examples.MapFun.))))
+          (.stateSnapshots)
+          (.flatMapToPair (examples.FlatMapMultisetSource.))))))
 
 ;; TODO: deal with singleton multisets!
 (defn multiplicities
@@ -202,33 +214,35 @@
 ;; TODO: buffering
 (defn -main
   [& args]
-  (let [complete (redis "localhost" "bxlqueue" :user-id 2)
-        ;complete (redis "localhost" "kaka" :user-id)
-        ;complete (redis "localhost" "kaka" :id)
-        ;pairs (.flatMapToPair complete (examples.FlatMapFun.))
-        filtered-on-size (filter-key-size complete 2)
-        directions (reduce-by-key filtered-on-size
-                                  #(let [t1 (ftime/parse (:time %1))
-                                         t2 (ftime/parse (:time %2))]
-                                    (if (time/before? t1 t2)
-                                      (calculate-direction (:position %2) (:position %1))
-                                      (calculate-direction (:position %1) (:position %2)))))
-        multiset (hash-to-multiset directions)
-        directions* (map* multiset second)
-        counts (multiplicities directions*)
-        max-direction (reduce* counts (fn [t1 t2]
-                                        (let [[d1 c1] t1
-                                              [d2 c2] t2]
-                                          (if (> c1 c2) t1 t2))))
-        ]
-
-    ;(.print complete)
-    ;(.print filtered-on-size)
-    ;(.print directions)
-    ;(.print multiset)
-    ;(.print directions*)
-    (.print counts)
-    (.print max-direction)
-
+  (let [r (redis "localhost" "kaka" :buffer 4)]
+    (.print r)
+    (.print (multiplicities r))
     (.start ssc)
-    (.awaitTermination ssc)))
+    (.awaitTermination ssc))
+
+  (comment
+    (let [complete (redis "localhost" "bxlqueue" :user-id :buffer 2)
+          filtered-on-size (filter-key-size complete 2)
+          directions (reduce-by-key filtered-on-size
+                                    #(let [t1 (ftime/parse (:time %1))
+                                           t2 (ftime/parse (:time %2))]
+                                      (if (time/before? t1 t2)
+                                        (calculate-direction (:position %2) (:position %1))
+                                        (calculate-direction (:position %1) (:position %2)))))
+          multiset (hash-to-multiset directions)
+          directions* (map* multiset second)
+          counts (multiplicities directions*)
+          max-direction (reduce* counts (fn [t1 t2]
+                                          (let [[d1 c1] t1
+                                                [d2 c2] t2]
+                                            (if (> c1 c2) t1 t2))))]
+      ;(.print complete)
+      ;(.print filtered-on-size)
+      ;(.print directions)
+      ;(.print multiset)
+      ;(.print directions*)
+      (.print counts)
+      (.print max-direction)
+
+      (.start ssc)
+      (.awaitTermination ssc))))
