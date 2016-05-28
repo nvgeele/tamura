@@ -138,14 +138,18 @@
     - Hoe gaan we om met configuratie?
     - We kunnen met macros code genereren tijdens compile-time, maar hoe worden argumenten geevalueerd?
     - En niet alleen argumenten, what about definitie van de graph zelf?
+    - Hoe zit het met echte reactive computations/incremental shit?
   "
 
   )
 
 (comment
-  lpush kaka "{:user-id 1, :position [0.41497792244969556 0.49798402446719936], :time \"2016-05-28T14:48:51.331Z\"}" "{:user-id 2, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}"
-  lpush kaka "{:user-id 1, :position [0.018471146703515684 0.07674546533119342], :time \"2016-05-28T14:49:51.387Z\"}" "{:user-id 2, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}"
-  )
+  "{:user-id 1, :position [0.41497792244969556 0.49798402446719936], :time \"2016-05-28T14:48:51.331Z\"}"
+  "{:user-id 2, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}"
+  "{:user-id 3, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}"
+  "{:user-id 1, :position [0.018471146703515684 0.07674546533119342], :time \"2016-05-28T14:49:51.387Z\"}"
+  "{:user-id 2, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}"
+  "{:user-id 3, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}")
 
 (def sc (-> (conf/spark-conf)
             (conf/master "local[2]")
@@ -170,10 +174,18 @@
       (.reduce (fn/function2 #(merge-with + %1 %2)))
       (fs/flat-map vec)))
 
+;; TODO: initial value
+(defn reduce*
+  ([input-stream f]
+    (.reduce input-stream (fn/function2 f)))
+  ([input-stream f initial]
+    (throw (Exception. "TODO"))))
+
 ;; TODO: buffering
 (defn -main
   [& args]
-  (let [complete (redis "localhost" "kaka" :user-id)
+  (let [complete (redis "localhost" "bxlqueue" :user-id)
+        ;complete (redis "localhost" "kaka" :user-id)
         ;complete (redis "localhost" "kaka" :id)
         ;pairs (.flatMapToPair complete (examples.FlatMapFun.))
         filtered-on-size (filter-key-size complete 2)
@@ -186,6 +198,10 @@
         multiset (hash-to-multiset directions)
         directions* (map* multiset second)
         counts (multiplicities directions*)
+        max-direction (reduce* counts (fn [t1 t2]
+                                        (let [[d1 c1] t1
+                                              [d2 c2] t2]
+                                          (if (> c1 c2) t1 t2))))
         ]
 
     ;(.print complete)
@@ -194,6 +210,7 @@
     ;(.print multiset)
     ;(.print directions*)
     (.print counts)
+    (.print max-direction)
 
 
     (.start ssc)
