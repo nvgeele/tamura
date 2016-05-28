@@ -18,15 +18,27 @@
 (gen-class
   :name examples.MapFun
   :implements [org.apache.spark.api.java.function.Function3]
-  ;:state "state"
-  ;:init "init"
-  ;:constructors {[] []}
+  :state state
+  :init init
+  :constructors {[] []
+                 [Number] []}
   :prefix "func-map-")
+
+(defn func-map-init
+  ([] [[] {:buffered? false}])
+  ([size] [[] {:buffered? true :size size}]))
 
 (defn func-map-call
   [this id optionalArg state]
   (let [val (.get optionalArg)
-        set (conj (if (.exists state) (.get state) []) val)]
+        s (.state this)
+        existing (if (.exists state) (.get state) [])
+        set (conj (if (and (not (empty? existing))
+                           (boolean (:buffered? s))
+                           (= (count existing) (:size s)))
+                    (vec (rest existing))
+                    existing)
+                  val)]
     (.update state set)
     (ft/tuple id set)))
 
@@ -152,7 +164,7 @@
   "{:user-id 3, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}")
 
 (def sc (-> (conf/spark-conf)
-            (conf/master "local[2]")
+            (conf/master "local[*]")
             (conf/app-name "flame_princess")
             (f/spark-context)))
 (def ssc (fs/streaming-context sc 1000))
@@ -160,12 +172,18 @@
 (fs/checkpoint ssc "/tmp/checkpoint")
 
 (defn redis
-  [host queue id]
-  (-> (.receiverStream ssc (RedisReceiver. host queue))
-      (fs/map-to-pair (f/fn [str] (let [m (edn/read-string str)]
-                                    (ft/tuple (get m id) (dissoc m id)))))
-      (.mapWithState (StateSpec/function (examples.MapFun.)))
-      (.stateSnapshots)))
+  ([host queue id]
+   (-> (.receiverStream ssc (RedisReceiver. host queue))
+       (fs/map-to-pair (f/fn [str] (let [m (edn/read-string str)]
+                                     (ft/tuple (get m id) (dissoc m id)))))
+       (.mapWithState (StateSpec/function (examples.MapFun.)))
+       (.stateSnapshots)))
+  ([host queue id buffer-size]
+    (-> (.receiverStream ssc (RedisReceiver. host queue))
+        (fs/map-to-pair (f/fn [str] (let [m (edn/read-string str)]
+                                      (ft/tuple (get m id) (dissoc m id)))))
+        (.mapWithState (StateSpec/function (examples.MapFun. buffer-size)))
+        (.stateSnapshots))))
 
 ;; TODO: deal with singleton multisets!
 (defn multiplicities
@@ -184,34 +202,43 @@
 ;; TODO: buffering
 (defn -main
   [& args]
-  (let [complete (redis "localhost" "bxlqueue" :user-id)
-        ;complete (redis "localhost" "kaka" :user-id)
-        ;complete (redis "localhost" "kaka" :id)
-        ;pairs (.flatMapToPair complete (examples.FlatMapFun.))
-        filtered-on-size (filter-key-size complete 2)
-        directions (reduce-by-key filtered-on-size
-                                  #(let [t1 (ftime/parse (:time %1))
-                                         t2 (ftime/parse (:time %2))]
-                                    (if (time/before? t1 t2)
-                                      (calculate-direction (:position %2) (:position %1))
-                                      (calculate-direction (:position %1) (:position %2)))))
-        multiset (hash-to-multiset directions)
-        directions* (map* multiset second)
-        counts (multiplicities directions*)
-        max-direction (reduce* counts (fn [t1 t2]
-                                        (let [[d1 c1] t1
-                                              [d2 c2] t2]
-                                          (if (> c1 c2) t1 t2))))
-        ]
 
-    ;(.print complete)
-    ;(.print filtered-on-size)
-    ;(.print directions)
-    ;(.print multiset)
-    ;(.print directions*)
-    (.print counts)
-    (.print max-direction)
+  (.print (redis "localhost" "kaka" :id 2))
+
+  (print "Starting... ")
+  (.start ssc)
+  (println "OK")
+  (.awaitTermination ssc)
+
+  (comment
+    (let [complete (redis "localhost" "bxlqueue" :user-id)
+          ;complete (redis "localhost" "kaka" :user-id)
+          ;complete (redis "localhost" "kaka" :id)
+          ;pairs (.flatMapToPair complete (examples.FlatMapFun.))
+          filtered-on-size (filter-key-size complete 2)
+          directions (reduce-by-key filtered-on-size
+                                    #(let [t1 (ftime/parse (:time %1))
+                                           t2 (ftime/parse (:time %2))]
+                                      (if (time/before? t1 t2)
+                                        (calculate-direction (:position %2) (:position %1))
+                                        (calculate-direction (:position %1) (:position %2)))))
+          multiset (hash-to-multiset directions)
+          directions* (map* multiset second)
+          counts (multiplicities directions*)
+          max-direction (reduce* counts (fn [t1 t2]
+                                          (let [[d1 c1] t1
+                                                [d2 c2] t2]
+                                            (if (> c1 c2) t1 t2))))
+          ]
+
+      ;(.print complete)
+      ;(.print filtered-on-size)
+      ;(.print directions)
+      ;(.print multiset)
+      ;(.print directions*)
+      (.print counts)
+      (.print max-direction)
 
 
-    (.start ssc)
-    (.awaitTermination ssc)))
+      (.start ssc)
+      (.awaitTermination ssc))))
