@@ -202,43 +202,33 @@
 ;; TODO: buffering
 (defn -main
   [& args]
+  (let [complete (redis "localhost" "bxlqueue" :user-id 2)
+        ;complete (redis "localhost" "kaka" :user-id)
+        ;complete (redis "localhost" "kaka" :id)
+        ;pairs (.flatMapToPair complete (examples.FlatMapFun.))
+        filtered-on-size (filter-key-size complete 2)
+        directions (reduce-by-key filtered-on-size
+                                  #(let [t1 (ftime/parse (:time %1))
+                                         t2 (ftime/parse (:time %2))]
+                                    (if (time/before? t1 t2)
+                                      (calculate-direction (:position %2) (:position %1))
+                                      (calculate-direction (:position %1) (:position %2)))))
+        multiset (hash-to-multiset directions)
+        directions* (map* multiset second)
+        counts (multiplicities directions*)
+        max-direction (reduce* counts (fn [t1 t2]
+                                        (let [[d1 c1] t1
+                                              [d2 c2] t2]
+                                          (if (> c1 c2) t1 t2))))
+        ]
 
-  (.print (redis "localhost" "kaka" :id 2))
+    ;(.print complete)
+    ;(.print filtered-on-size)
+    ;(.print directions)
+    ;(.print multiset)
+    ;(.print directions*)
+    (.print counts)
+    (.print max-direction)
 
-  (print "Starting... ")
-  (.start ssc)
-  (println "OK")
-  (.awaitTermination ssc)
-
-  (comment
-    (let [complete (redis "localhost" "bxlqueue" :user-id)
-          ;complete (redis "localhost" "kaka" :user-id)
-          ;complete (redis "localhost" "kaka" :id)
-          ;pairs (.flatMapToPair complete (examples.FlatMapFun.))
-          filtered-on-size (filter-key-size complete 2)
-          directions (reduce-by-key filtered-on-size
-                                    #(let [t1 (ftime/parse (:time %1))
-                                           t2 (ftime/parse (:time %2))]
-                                      (if (time/before? t1 t2)
-                                        (calculate-direction (:position %2) (:position %1))
-                                        (calculate-direction (:position %1) (:position %2)))))
-          multiset (hash-to-multiset directions)
-          directions* (map* multiset second)
-          counts (multiplicities directions*)
-          max-direction (reduce* counts (fn [t1 t2]
-                                          (let [[d1 c1] t1
-                                                [d2 c2] t2]
-                                            (if (> c1 c2) t1 t2))))
-          ]
-
-      ;(.print complete)
-      ;(.print filtered-on-size)
-      ;(.print directions)
-      ;(.print multiset)
-      ;(.print directions*)
-      (.print counts)
-      (.print max-direction)
-
-
-      (.start ssc)
-      (.awaitTermination ssc))))
+    (.start ssc)
+    (.awaitTermination ssc)))
