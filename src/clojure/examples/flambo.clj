@@ -15,6 +15,38 @@
   (:import [examples RedisReceiver]
            (org.apache.spark.streaming StateSpec)))
 
+;; SPARK (STREAMING) SETUP ;;
+
+(def sc (-> (conf/spark-conf)
+            (conf/master "local[*]")
+            (conf/app-name "flame_princess")
+            (f/spark-context)))
+(def ssc (fs/streaming-context sc 1000))
+(fs/checkpoint ssc "/tmp/checkpoint")
+
+;; HELPERS ;;
+
+(defmacro ^{:private true} assert-args
+  [& pairs]
+  `(do (when-not ~(first pairs)
+         (throw (IllegalArgumentException.
+                  (str (first ~'&form) " requires " ~(second pairs) " in " ~'*ns* ":" (:line (meta ~'&form))))))
+       ~(let [more (nnext pairs)]
+          (when more
+            (list* `assert-args more)))))
+
+(defmacro assert*
+  [& pairs]
+  (assert-args
+    (>= (count pairs) 2) "2 or more expressions in the body"
+    (even? (count pairs)) "an even amount of expressions")
+  `(do (assert ~(first pairs) ~(second pairs))
+       ~(let [more (nnext pairs)]
+          (when more
+            (list* `assert* more)))))
+
+;; HELPER CLASSES ;;
+
 (gen-class
   :name examples.MapFun
   :implements [org.apache.spark.api.java.function.Function3]
@@ -92,9 +124,107 @@
         vals (._2 val)]
     (>= (count vals) size)))
 
+;; PRIMITIVES ;;
+
+(defn redis
+  [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
+  (let [receiver (.receiverStream ssc (RedisReceiver. host queue))]
+    {:type        ::redis
+     :return-type (if key :hash :multiset)
+     :stream      (if key
+                    (-> (fs/map-to-pair receiver (f/fn [str] (let [m (edn/read-string str)]
+                                                               (ft/tuple (get m key) (dissoc m key)))))
+                        (.mapWithState (StateSpec/function (if buffer
+                                                             (examples.MapFun. buffer)
+                                                             (examples.MapFun.))))
+                        (.stateSnapshots))
+                    (-> (fs/map-to-pair receiver #(ft/tuple 0 (edn/read-string %)))
+                        (.mapWithState (StateSpec/function (if buffer
+                                                             (examples.MapFun. buffer)
+                                                             (examples.MapFun.))))
+                        (.stateSnapshots)
+                        (.flatMapToPair (examples.FlatMapMultisetSource.))))}))
+(derive ::redis ::source)
+
 (defn filter-key-size
-  [pair-stream size]
-  (.filter pair-stream (examples.FilterKeySizeFunction. 2)))
+  [input size]
+  (assert*
+    (= (:return-type input) :hash) "filter-key-size input must be a hash")
+  {:type ::filter-key-size
+   :return-type :hash
+   :stream (.filter (:stream input) (examples.FilterKeySizeFunction. size))})
+
+;; Passing an initial value to FlatMapFun is a trick to deal with the fact that reduce in Spark Streaming
+;; does not take an initial value...
+(defn reduce-by-key
+  ([input function]
+   (assert*
+     (= (:return-type input) :hash) "reduce-by-key input must be a hash")
+   {:type ::reduce-by-key
+    :return-type :hash
+    :stream (-> (.flatMapToPair (:stream input) (examples.FlatMapFun.))
+                (fs/reduce-by-key function)
+                (.groupByKey))})
+  ([input function initial]
+   (assert*
+     (= (:return-type input) :hash) "reduce-by-key input must be a hash")
+   {:type ::reduce-by-key
+    :return-type :hash
+    :stream (-> (.flatMapToPair (:stream input) (examples.FlatMapFun. initial))
+                (fs/reduce-by-key function)
+                (.groupByKey))}))
+
+(defn hash-to-multiset
+  [input]
+  (assert*
+    (= (:return-type input) :hash) "hash-to-multiset input must be a hash")
+  {:type ::hash-to-multiset
+   :return-type :multiset
+   :stream (-> (.flatMapToPair (:stream input) (examples.FlatMapFun.))
+               (fs/map (f/fn [t] [(._1 t) (._2 t)])))})
+
+(defn map*
+  [input f]
+  (assert*
+    (= (:return-type input) :multiset) "map input must be a multiset")
+  {:type ::map
+   :return-type :multiset
+   :stream (fs/map (:stream input) f)})
+
+(defn multiplicities
+  [input]
+  (assert*
+    (= (:return-type input) :multiset) "multiplicities input must be a multiset")
+  {:type ::multiplicities
+   :return-type :multiset
+   :stream (-> (fs/map (:stream input) #(assoc {} % 1))
+               (.reduce (fn/function2 #(merge-with + %1 %2)))
+               (fs/flat-map vec))})
+
+(defn reduce*
+  ([input f]
+   (assert*
+     (= (:return-type input) :multiset) "reduce input must be a multiset")
+   {:type ::reduce
+    :return-type :multiset
+    :stream (.reduce (:stream input) (fn/function2 f))})
+  ([input f initial]
+   (assert*
+     (= (:return-type input) :multiset) "reduce input must be a multiset")
+   (throw (Exception. "TODO"))))
+
+(defn print*
+  [input]
+  (.print (:stream input)))
+
+;; THE REST ;;
+
+(comment
+  "Waar er over moet nagedacht worden:
+    - Hoe gaan we om met configuratie?
+    - We kunnen met macros code genereren tijdens compile-time, maar hoe worden argumenten geevalueerd?
+    - En niet alleen argumenten, what about definitie van de graph zelf?
+    - Hoe zit het met echte reactive computations/incremental shit?")
 
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
@@ -108,141 +238,25 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
-;; Passing an initial value to FlatMapFun is a trick to deal with the fact that reduce in Spark Streaming
-;; does not take an initial value...
-(defn reduce-by-key
-  ([input-stream function]
-   (-> (.flatMapToPair input-stream (examples.FlatMapFun.))
-       (fs/reduce-by-key function)
-       (.groupByKey)))
-  ([input-stream function initial]
-   (-> (.flatMapToPair input-stream (examples.FlatMapFun. initial))
-       (fs/reduce-by-key function)
-       (.groupByKey))))
-
-(defn hash-to-multiset
-  [input]
-  (-> (.flatMapToPair input (examples.FlatMapFun.))
-      (fs/map (f/fn [t] [(._1 t) (._2 t)]))))
-
-(defn map*
-  [input f]
-  (fs/map input f))
-
-(comment
-  (-> (t/redis redis-host redis-key :key :user-id :buffer 2)
-      (t/filter-key-size 2)
-      (t/reduce-by-key #(let [t1 (f/parse (:time %1))
-                              t2 (f/parse (:time %2))]
-                         (if (time/before? t1 t2)
-                           (calculate-direction (:position %2) (:position %1))
-                           (calculate-direction (:position %1) (:position %2)))))
-      (t/hash-to-multiset)
-      (t/map second)
-      (t/multiplicities)
-      (t/reduce (fn [t1 t2]
-                  (let [[d1 c1] t1
-                        [d2 c2] t2]
-                    (if (> c1 c2) t1 t2)))))
-  "Wat er nodig is hiervoor:
-    - Redis receiver
-    - Buffered source: 2 bijhouden per key
-    - Enkel keys doorlaten met 2 of meer values
-    - Per key reducen
-    - De tuples omvormen tot een multiset (PairDStream naar gewone DStream)
-    - Mappen over de tuples
-    - De multiplicities berekenen (MOEILIJK...)
-    - Alles reducen
-    - Printen
-
-   Waar er over moet nagedacht worden:
-    - Hoe gaan we om met configuratie?
-    - We kunnen met macros code genereren tijdens compile-time, maar hoe worden argumenten geevalueerd?
-    - En niet alleen argumenten, what about definitie van de graph zelf?
-    - Hoe zit het met echte reactive computations/incremental shit?
-  "
-
-  )
-
-(comment
-  "{:user-id 1, :position [0.41497792244969556 0.49798402446719936], :time \"2016-05-28T14:48:51.331Z\"}"
-  "{:user-id 2, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}"
-  "{:user-id 3, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}"
-  "{:user-id 1, :position [0.018471146703515684 0.07674546533119342], :time \"2016-05-28T14:49:51.387Z\"}"
-  "{:user-id 2, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}"
-  "{:user-id 3, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}")
-
-(def sc (-> (conf/spark-conf)
-            (conf/master "local[*]")
-            (conf/app-name "flame_princess")
-            (f/spark-context)))
-(def ssc (fs/streaming-context sc 1000))
-
-(fs/checkpoint ssc "/tmp/checkpoint")
-
-(defn redis
-  [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
-  (let [receiver (.receiverStream ssc (RedisReceiver. host queue))]
-    (if key
-      (-> (fs/map-to-pair receiver (f/fn [str] (let [m (edn/read-string str)]
-                                                 (ft/tuple (get m key) (dissoc m key)))))
-          (.mapWithState (StateSpec/function (if buffer
-                                               (examples.MapFun. buffer)
-                                               (examples.MapFun.))))
-          (.stateSnapshots))
-      (-> (fs/map-to-pair receiver #(ft/tuple 0 (edn/read-string %)))
-          (.mapWithState (StateSpec/function (if buffer
-                                               (examples.MapFun. buffer)
-                                               (examples.MapFun.))))
-          (.stateSnapshots)
-          (.flatMapToPair (examples.FlatMapMultisetSource.))))))
-
-;; TODO: deal with singleton multisets!
-(defn multiplicities
-  [input-stream]
-  (-> (fs/map input-stream #(assoc {} % 1))
-      (.reduce (fn/function2 #(merge-with + %1 %2)))
-      (fs/flat-map vec)))
-
-;; TODO: initial value
-(defn reduce*
-  ([input-stream f]
-    (.reduce input-stream (fn/function2 f)))
-  ([input-stream f initial]
-    (throw (Exception. "TODO"))))
-
-;; TODO: buffering
 (defn -main
   [& args]
-  (let [r (redis "localhost" "kaka" :buffer 4)]
-    (.print r)
-    (.print (multiplicities r))
+  (let [complete (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
+        filtered-on-size (filter-key-size complete 2)
+        directions (reduce-by-key filtered-on-size
+                                  #(let [t1 (ftime/parse (:time %1))
+                                         t2 (ftime/parse (:time %2))]
+                                    (if (time/before? t1 t2)
+                                      (calculate-direction (:position %2) (:position %1))
+                                      (calculate-direction (:position %1) (:position %2)))))
+        multiset (hash-to-multiset directions)
+        directions* (map* multiset second)
+        counts (multiplicities directions*)
+        max-direction (reduce* counts (fn [t1 t2]
+                                        (let [[d1 c1] t1
+                                              [d2 c2] t2]
+                                          (if (> c1 c2) t1 t2))))]
+    (print* counts)
+    (print* max-direction)
+
     (.start ssc)
-    (.awaitTermination ssc))
-
-  (comment
-    (let [complete (redis "localhost" "bxlqueue" :user-id :buffer 2)
-          filtered-on-size (filter-key-size complete 2)
-          directions (reduce-by-key filtered-on-size
-                                    #(let [t1 (ftime/parse (:time %1))
-                                           t2 (ftime/parse (:time %2))]
-                                      (if (time/before? t1 t2)
-                                        (calculate-direction (:position %2) (:position %1))
-                                        (calculate-direction (:position %1) (:position %2)))))
-          multiset (hash-to-multiset directions)
-          directions* (map* multiset second)
-          counts (multiplicities directions*)
-          max-direction (reduce* counts (fn [t1 t2]
-                                          (let [[d1 c1] t1
-                                                [d2 c2] t2]
-                                            (if (> c1 c2) t1 t2))))]
-      ;(.print complete)
-      ;(.print filtered-on-size)
-      ;(.print directions)
-      ;(.print multiset)
-      ;(.print directions*)
-      (.print counts)
-      (.print max-direction)
-
-      (.start ssc)
-      (.awaitTermination ssc))))
+    (.awaitTermination ssc)))
