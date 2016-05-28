@@ -152,35 +152,18 @@
       (.mapWithState (StateSpec/function (examples.MapFun.)))
       (.stateSnapshots)))
 
-(comment
-  (def reduce-function
-    #(let [t1 (ftime/parse (:time %1))
-           t2 (ftime/parse (:time %2))]
-      (if (time/before? t1 t2)
-        (calculate-direction (:position %2) (:position %1))
-        (calculate-direction (:position %1) (:position %2))))))
-
-(comment
-  (def reduce-function
-    (f/fn [v1 v2]
-      (let [t1 (ftime/parse (:time v1))
-            t2 (ftime/parse (:time v2))]
-        (if (time/before? t1 t2)
-          (calculate-direction (:position v2) (:position v1))
-          (calculate-direction (:position v1) (:position v2)))))))
-
 (defn -main
   [& args]
   (let [complete (redis "localhost" "kaka" :user-id)
         ;complete (redis "localhost" "kaka" :id)
         ;pairs (.flatMapToPair complete (examples.FlatMapFun.))
         filtered-on-size (filter-key-size complete 2)
-        ;directions (reduce-by-key filtered-on-size reduce-function)
         directions (reduce-by-key filtered-on-size
-                                  #(assoc {} :v (+ (:v %1) (:v %2))))
-        directions* (reduce-by-key filtered-on-size
-                                   #(assoc {} :v (+ (:v %1) (:v %2)))
-                                   {:v 100})
+                                  #(let [t1 (ftime/parse (:time %1))
+                                         t2 (ftime/parse (:time %2))]
+                                    (if (time/before? t1 t2)
+                                      (calculate-direction (:position %2) (:position %1))
+                                      (calculate-direction (:position %1) (:position %2)))))
         ]
 
     ;(.print input-pairs)
@@ -190,7 +173,6 @@
     ;(.print pairs)
     ;(.print (fs/reduce-by-key pairs (f/fn [x y] {:v (+ (:v x) (:v y))})))
     (.print directions)
-    (.print directions*)
 
     )
 
