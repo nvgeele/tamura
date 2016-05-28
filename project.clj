@@ -20,6 +20,12 @@
                  [redis.clients/jedis "2.8.0"]
 
                  [org.apache.spark/spark-core_2.10 "1.6.1"]
+                 [org.apache.spark/spark-streaming_2.10 "1.6.1"]
+
+                 ;; deps for flambo streaming
+                 [org.apache.spark/spark-streaming-kafka_2.10 "1.6.1"]
+                 [org.apache.spark/spark-streaming-flume_2.10 "1.6.1"]
+
                  [yieldbot/flambo "0.7.1"]
                  [gorillalabs/sparkling "1.2.5"]
 
@@ -34,8 +40,8 @@
 
   :profiles {:dev
              {:aot [
-                    ;examples.spark-compile
-                    examples.sparkling
+                    examples.flambo
+                    ;examples.sparkling
                     ]}}
 
   :main ^:skip-aot tamura.core
