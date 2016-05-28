@@ -41,13 +41,25 @@
 (gen-class
   :name examples.FlatMapFun
   :implements [org.apache.spark.api.java.function.PairFlatMapFunction]
-  :prefix "func-flatmap-")
+  :prefix "func-flatmap-"
+  :state state
+  :init init
+  :constructors {[Object] []
+                 [] []})
+
+(defn func-flatmap-init
+  ([] [[] {:init? false}])
+  ([val] [[] {:init? true :v val}]))
 
 (defn func-flatmap-call
   [this val]
   (let [key (._1 val)
-        vals (._2 val)]
-    (map #(ft/tuple key %) vals)))
+        vals (._2 val)
+        mapped (map #(ft/tuple key %) vals)
+        s (.state this)]
+    (if (boolean (:init? s))
+      (cons (ft/tuple key (:v s)) mapped)
+      mapped)))
 
 (gen-class
   :name examples.FilterKeySizeFunction
@@ -89,7 +101,9 @@
        (fs/reduce-by-key function)
        (.groupByKey)))
   ([input-stream function initial]
-    (throw (Exception. "ToDo"))))
+   (-> (.flatMapToPair input-stream (examples.FlatMapFun. initial))
+       (fs/reduce-by-key function)
+       (.groupByKey))))
 
 (comment
   (-> (t/redis redis-host redis-key :key :user-id :buffer 2)
