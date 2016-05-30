@@ -13,7 +13,8 @@
             [clj-time.core :as time]
             )
   (:import [examples RedisReceiver]
-           (org.apache.spark.streaming StateSpec)))
+           [org.apache.spark.streaming StateSpec]
+           [org.apache.spark.api.java JavaPairRDD]))
 
 ;; SPARK (STREAMING) SETUP ;;
 
@@ -60,6 +61,7 @@
   ([] [[] {:buffered? false}])
   ([size] [[] {:buffered? true :size size}]))
 
+;; TODO: We do not need to return the existing but just the key with a nil value
 (defn func-map-call
   [this id optionalArg state]
   (let [val (.get optionalArg)
@@ -128,23 +130,73 @@
 
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
-  (let [receiver (.receiverStream ssc (RedisReceiver. host queue))]
+  (let [receiver (.receiverStream ssc (RedisReceiver. host queue))
+        pairs (fs/map-to-pair receiver (if key
+                                         (f/fn [str] (let [m (edn/read-string str)]
+                                                       (ft/tuple (get m key) (dissoc m key))))
+                                         #(ft/tuple 0 (edn/read-string %))))
+        state (.mapWithState pairs (StateSpec/function (if buffer (examples.MapFun. buffer) (examples.MapFun.))))]
     {:type        ::redis
      :return-type (if key :hash :multiset)
+     :state       state
      :stream      (if key
-                    (-> (fs/map-to-pair receiver (f/fn [str] (let [m (edn/read-string str)]
-                                                               (ft/tuple (get m key) (dissoc m key)))))
-                        (.mapWithState (StateSpec/function (if buffer
-                                                             (examples.MapFun. buffer)
-                                                             (examples.MapFun.))))
-                        (.stateSnapshots))
-                    (-> (fs/map-to-pair receiver #(ft/tuple 0 (edn/read-string %)))
-                        (.mapWithState (StateSpec/function (if buffer
-                                                             (examples.MapFun. buffer)
-                                                             (examples.MapFun.))))
-                        (.stateSnapshots)
+                    (.stateSnapshots state)
+                    (-> (.stateSnapshots state)
                         (.flatMapToPair (examples.FlatMapMultisetSource.))))}))
 (derive ::redis ::source)
+
+(gen-class
+  :name examples.DelayMapMultiset
+  :implements [org.apache.spark.api.java.function.Function3]
+  :prefix "delay-map-ms-")
+
+(defn delay-map-ms-call
+  [this id optionalArg state]
+  (let [previous (if (.exists state) (.get state) [])]
+    (.update state (.get optionalArg))
+    (ft/tuple id previous)))
+
+;; first gather everything under keys
+
+;; TODO: delay (only after a source?)
+(defn delay
+  [input]
+  {:stream (-> (:stream input)
+               (fs/map-to-pair (f/fn [val] (ft/tuple 0 val)))
+               (.groupByKey)
+               (.mapWithState (StateSpec/function (examples.DelayMapMultiset.)))
+               (.flatMapToPair (examples.FlatMapMultisetSource.)))})
+
+;; TODO: buffer (only after a source)
+(defn buffer
+  [input])
+
+;; TODO: diff-add / diff-remove (only after source, buffer, and maybe delay)
+(defn diff-add
+  [input])
+
+(defn diff-remove
+  [input])
+
+;; TODO: test
+(defn filter*
+  [input pred]
+  (assert*
+    (= (:return-type input) :multiset) "filter input must be a multiset")
+  {:type ::filter
+   :return-type :multiset
+   :stream (.filter (:stream input) (fn/function pred))})
+
+;; TODO: test
+(defn filter-by-key
+  [input pred]
+  (assert*
+    (= (:return-type input) :hash) "filter-by-key input must be a hash")
+  {:type ::filter-by-key
+   :return-type :hash
+   :stream (-> (.flatMapToPair (:stream input) (examples.FlatMapFun.))
+               (.filter (fn/function2 (fn [k v] (pred v))))
+               (.groupByKey))})
 
 (defn filter-key-size
   [input size]
@@ -153,6 +205,18 @@
   {:type ::filter-key-size
    :return-type :hash
    :stream (.filter (:stream input) (examples.FilterKeySizeFunction. size))})
+
+(defn reduce*
+  ([input f]
+   (assert*
+     (= (:return-type input) :multiset) "reduce input must be a multiset")
+   {:type ::reduce
+    :return-type :multiset
+    :stream (.reduce (:stream input) (fn/function2 f))})
+  ([input f initial]
+   (assert*
+     (= (:return-type input) :multiset) "reduce input must be a multiset")
+   (throw (Exception. "TODO"))))
 
 ;; Passing an initial value to FlatMapFun is a trick to deal with the fact that reduce in Spark Streaming
 ;; does not take an initial value...
@@ -191,6 +255,19 @@
    :return-type :multiset
    :stream (fs/map (:stream input) f)})
 
+;; TODO: test
+(defn map-by-key
+  [input f]
+  (assert*
+    (= (:return-type input) :hash) "map-by-key input must be a hash")
+  {:type ::map-by-key
+   :return-type :hash
+   :stream (-> (.flatMapToPair (:stream input) (examples.FlatMapFun.))
+               (.mapValues (fn/function f))
+               (.groupByKey))})
+
+;; TODO: maybe countByValue->FlatMap is more performant
+;; TODO: maybe make multiplicities return a hash and then countByValue is ok
 (defn multiplicities
   [input]
   (assert*
@@ -200,18 +277,6 @@
    :stream (-> (fs/map (:stream input) #(assoc {} % 1))
                (.reduce (fn/function2 #(merge-with + %1 %2)))
                (fs/flat-map vec))})
-
-(defn reduce*
-  ([input f]
-   (assert*
-     (= (:return-type input) :multiset) "reduce input must be a multiset")
-   {:type ::reduce
-    :return-type :multiset
-    :stream (.reduce (:stream input) (fn/function2 f))})
-  ([input f initial]
-   (assert*
-     (= (:return-type input) :multiset) "reduce input must be a multiset")
-   (throw (Exception. "TODO"))))
 
 (defn print*
   [input]
@@ -238,25 +303,94 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
+;; TODO: so what if we use a state to actually memoize stuff?
+
+(comment
+  "If we execute the following snippet, and add two numbers to test-ms, we will see that
+   `reducing!' is printed every tick. This means that Spark Streaming is not incremental.
+
+   In Tamura, the runtime uses the `changed?' flag to avoid redundant computation. It would be
+   amazing to implement a similar method in Spark Streaming.
+
+   Ideally, when using the .stateSnapshots method on source states, we would like to trigger computation
+   in downstream nodes only when data was added or removed. How we do this however, I do not know at
+   the moment."
+
+  (print* (reduce* (redis "localhost" "test-ms")
+                   (f/fn [l r]
+                     (println "reducing!")
+                     (+ l r)))))
+
+(comment
+  "Right now a hash is a stream of <K, Iterable<V>>,
+   might be more performant of just having a stream of <K, V> tuples.")
+
+(defn print-methods
+  [obj]
+  (let [methods (sort #(compare (.getName %1) (.getName %2)) (.getMethods (type obj)))]
+    (doseq [m methods]
+      (println "Method Name: " (.getName m))
+      (println "Return Type: " (.getReturnType m) "\n"))))
+
 (defn -main
   [& args]
-  (let [complete (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
-        filtered-on-size (filter-key-size complete 2)
-        directions (reduce-by-key filtered-on-size
-                                  #(let [t1 (ftime/parse (:time %1))
-                                         t2 (ftime/parse (:time %2))]
-                                    (if (time/before? t1 t2)
-                                      (calculate-direction (:position %2) (:position %1))
-                                      (calculate-direction (:position %1) (:position %2)))))
-        multiset (hash-to-multiset directions)
-        directions* (map* multiset second)
-        counts (multiplicities directions*)
-        max-direction (reduce* counts (fn [t1 t2]
-                                        (let [[d1 c1] t1
-                                              [d2 c2] t2]
-                                          (if (> c1 c2) t1 t2))))]
-    (print* counts)
-    (print* max-direction)
+  (comment
+    (let [input (redis "localhost" "test-ms")
+          delayed (delay input)]
+      (print* input)
+      (print* delayed)))
+  ;(print* (delay (redis "localhost" "test-ms-buf" :buffer 2)))
+
+  ;(print* (delay (redis "localhost" "test-hash" :key :id)))
+  ;(print* (delay (redis "localhost" "test-hash-buf" :key :id :buffer 2)))
+
+  ;(.start ssc)
+  ;(.awaitTermination ssc)
+
+  (let [input (redis "localhost" "test-hash" :key :id)
+        state (:stream input)
+        input (fs/map-to-pair (:state input) identity)
+        grouped (.cogroup input state)]
+    (.print state)
+    (.print (.transformToPair grouped
+                              (fn/function
+                                (fn [rdd]
+                                  (let [changed? (f/aggregate rdd false
+                                                              (fn [acc v]
+                                                                (let [input-vals (._1 (._2 v))]
+                                                                  (or (boolean acc)
+                                                                      (not (boolean (.isEmpty input-vals))))))
+                                                              (fn [l r]
+                                                                (or l r)))]
+                                    (comment (println "changed?:" changed?))
+                                    (if changed?
+                                      (f/flat-map-to-pair rdd (fn [v]
+                                                                (let [key (._1 v)
+                                                                      state-vals (._2 (._2 v))]
+                                                                  (map ft/tuple (repeat key) state-vals))))
+                                      (JavaPairRDD/fromJavaRDD (.emptyRDD sc))))))))
 
     (.start ssc)
-    (.awaitTermination ssc)))
+    (.awaitTermination ssc))
+
+  (comment
+    (let [complete (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
+          filtered-on-size (filter-key-size complete 2)
+          directions (reduce-by-key filtered-on-size
+                                    #(let [t1 (ftime/parse (:time %1))
+                                           t2 (ftime/parse (:time %2))]
+                                      (if (time/before? t1 t2)
+                                        (calculate-direction (:position %2) (:position %1))
+                                        (calculate-direction (:position %1) (:position %2)))))
+          multiset (hash-to-multiset directions)
+          directions* (map* multiset second)
+          counts (multiplicities directions*)
+          max-direction (reduce* counts (fn [t1 t2]
+                                          (let [[d1 c1] t1
+                                                [d2 c2] t2]
+                                            (if (> c1 c2) t1 t2))))]
+      (print* counts)
+      (print* max-direction)
+
+      (.start ssc)
+      (.awaitTermination ssc))))
