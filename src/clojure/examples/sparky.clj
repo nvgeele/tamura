@@ -292,6 +292,7 @@
             (recur (<! input) value))))
     (Node. id ::filter-key-size :hash sub-chan)))
 
+;; TODO: initial
 (defn make-reduce-by-key-node
   [id [fn initial] [input-node]]
   (let [sub-chan (chan)
@@ -309,6 +310,24 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (Node. id ::reduce-by-key :hash sub-chan)))
+
+(defn make-hash-to-multiset-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "hash-to-multiset node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map #(vector (._1 %) (._2 %))))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::hash-to-multiset :multiset sub-chan)))
 
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
@@ -344,7 +363,10 @@
   [input fn]
   (make-reduce-by-key-node (new-id!) [fn false] [input]))
 
-(defmacro hash-to-multiset [input] input)
+(defn hash-to-multiset
+  [input]
+  (make-hash-to-multiset-node (new-id!) [] [input]))
+
 (defmacro map* [input f] input)
 (defmacro multiplicities [input] input)
 (defmacro reduce* [input fn] input)
