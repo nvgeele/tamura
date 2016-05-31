@@ -347,7 +347,6 @@
             (recur (<! input) value))))
     (Node. id ::map :multiset sub-chan)))
 
-;; TODO: use reduce?
 (defn make-multiplicities-node
   [id [] [input-node]]
   (let [sub-chan (chan)
@@ -369,6 +368,28 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (Node. id ::multiplicities :multiset sub-chan)))
+
+;; TODO: initial
+(defn make-reduce-node
+  [id [f initial] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "reduce node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (if (.isEmpty (:value msg))
+                      (:value msg)
+                      (-> (:value msg)
+                          (f/reduce f)
+                          ((fn [e] (f/parallelize sc [e])))))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::reduce :multiset sub-chan)))
 
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
@@ -415,7 +436,10 @@
   [input]
   (make-multiplicities-node (new-id!) [] [input]))
 
-(defmacro reduce* [input fn] input)
+;; TODO: initial
+(defn reduce*
+  [input fn]
+  (make-reduce-node (new-id!) [fn false] [input]))
 
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
