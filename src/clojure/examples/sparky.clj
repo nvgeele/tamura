@@ -120,6 +120,7 @@
 (defrecord Source [id node-type return-type sub-chan in]) ;; isa Node
 (defrecord Sink [id node-type])                           ;; isa Node
 
+;; TODO: like Spark Streaming, do micro-batching
 (defn make-coordinator
   []
   (let [in (chan)]
@@ -267,12 +268,47 @@
             (recur (map <!! inputs) value))))
     (Node. id ::union :multiset sub-chan)))
 
-(defmacro filter-key-size [& args] true)
-(defmacro reduce-by-key [& args] true)
-(defmacro hash-to-multiset [& args] true)
-(defmacro map* [& args] true)
-(defmacro multiplicities [& args] true)
-(defmacro reduce* [& args] true)
+(defn make-filter-key-size-node
+  [id [size] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "filter-key-size node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/group-by-key)
+                        (.filter (fn/function
+                                   (fn [t]
+                                     (let [vals (._2 t)]
+                                       (>= (count vals) size)))))
+                        (f/flat-map-values (fn [vals]
+                                             vals)))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::filter-key-size :hash sub-chan)))
+
+(defn make-reduce-by-key-node
+  [id [fn initial] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "reduce-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/reduce-by-key fn))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::reduce-by-key :hash sub-chan)))
 
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
@@ -292,36 +328,71 @@
                     collect-hash
                     collect-multiset)]
     (go-loop [msg (<! input)]
-      ;(println* "print*" id "has received something")
+      ;(log/error "print*" id "has received something")
       (when (:changed? msg)
         (-> (:value msg)
             (collector)
             (pprint)))
       (recur (<! input)))))
 
+(defn filter-key-size
+  [input size]
+  (make-filter-key-size-node (new-id!) [size] [input]))
+
+;; TODO: initial
+(defn reduce-by-key
+  [input fn]
+  (make-reduce-by-key-node (new-id!) [fn false] [input]))
+
+(defmacro hash-to-multiset [input] input)
+(defmacro map* [input f] input)
+(defmacro multiplicities [input] input)
+(defmacro reduce* [input fn] input)
+
+(defn calculate-direction
+  [[cur_lat cur_lon] [pre_lat pre_lon]]
+  (let [y (* (Math/sin (- cur_lon pre_lon)) (Math/cos cur_lat))
+        x (- (* (Math/cos pre_lat) (Math/sin cur_lat))
+             (* (Math/sin pre_lat) (Math/cos cur_lat) (Math/cos (- cur_lon pre_lon))))
+        bearing (Math/atan2 y x)
+        deg (mod (+ (* bearing (/ 180.0 Math/PI)) 360) 360)]
+    (cond (and (>= deg 315.) (<= deg 45.)) :east
+          (and (>= deg 45.) (<= deg 135.)) :north
+          (and (>= deg 135.) (<= deg 225.)) :west
+          :else :south)))
+
+(comment
+  lpush bxlqueue "{:user-id 1, :position [0.41497792244969556 0.49798402446719936], :time \"2016-05-28T14:48:51.331Z\"}" "{:user-id 2, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}" "{:user-id 3, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}"
+
+  lpush bxlqueue "{:user-id 1, :position [0.018471146703515684 0.07674546533119342], :time \"2016-05-28T14:49:51.387Z\"}" "{:user-id 2, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}" "{:user-id 3, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}"
+  )
+
 (defn -main
   [& args]
-  (let [l (redis "localhost" "q1" :buffer 2)
-        r (redis "localhost" "q2")
-        u (union l r)]
-    (print* u)
-    (start!)
-    (println "Let's go!"))
-
   (comment
-    (let [r1 (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
-          r2 (filter-key-size r1 2)
-          r3 (reduce-by-key r2
-                            #(let [t1 (ftime/parse (:time %1))
-                                   t2 (ftime/parse (:time %2))]
-                              (if (time/before? t1 t2)
-                                (calculate-direction (:position %2) (:position %1))
-                                (calculate-direction (:position %1) (:position %2)))))
-          r4 (hash-to-multiset r3)
-          r5 (map* r4 second)
-          r6 (multiplicities r5)
-          r7 (reduce* r6 (fn [t1 t2]
-                           (let [[d1 c1] t1
-                                 [d2 c2] t2]
-                             (if (> c1 c2) t1 t2))))]
-      (print* r7))))
+    (let [l (redis "localhost" "q1" :buffer 2)
+          r (redis "localhost" "q2")
+          u (union l r)]
+      (print* u)
+      (start!)
+      (println "Let's go!")))
+
+  (comment)
+  (let [r1 (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
+        r2 (filter-key-size r1 2)
+        r3 (reduce-by-key r2
+                          #(let [t1 (ftime/parse (:time %1))
+                                 t2 (ftime/parse (:time %2))]
+                            (if (time/before? t1 t2)
+                              (calculate-direction (:position %2) (:position %1))
+                              (calculate-direction (:position %1) (:position %2)))))
+        r4 (hash-to-multiset r3)
+        r5 (map* r4 second)
+        r6 (multiplicities r5)
+        r7 (reduce* r6 (fn [t1 t2]
+                         (let [[d1 c1] t1
+                               [d2 c2] t2]
+                           (if (> c1 c2) t1 t2))))]
+    (print* r7)
+    (start!)
+    (println "Let's go!")))
