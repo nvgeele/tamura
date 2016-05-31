@@ -300,8 +300,10 @@
               value (emptyRDD)]
       (log/debug (str "reduce-by-key node" id " has received: " msg))
       (if (:changed? msg)
-        (let [value (-> (:value msg)
-                        (f/reduce-by-key fn))]
+        (let [value (if (.isEmpty (:value msg))
+                      (:value msg)
+                      (-> (:value msg)
+                          (f/reduce-by-key fn)))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
@@ -345,6 +347,29 @@
             (recur (<! input) value))))
     (Node. id ::map :multiset sub-chan)))
 
+;; TODO: use reduce?
+(defn make-multiplicities-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "multiplicities node" id " has received: " msg))
+      ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
+      (if (:changed? msg)
+        (let [value (if (.isEmpty (:value msg))
+                      (:value msg)
+                      (-> (:value msg)
+                          (f/aggregate {} #(merge-with + %1 (assoc {} %2 1)) #(merge-with + %1 %2))
+                          ((fn [m] (f/parallelize sc (vec m))))))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::multiplicities :multiset sub-chan)))
+
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
   (let [id (new-id!)]
@@ -386,7 +411,10 @@
   [input f]
   (make-map-node (new-id!) [f] [input]))
 
-(defmacro multiplicities [input] input)
+(defn multiplicities
+  [input]
+  (make-multiplicities-node (new-id!) [] [input]))
+
 (defmacro reduce* [input fn] input)
 
 (defn calculate-direction
