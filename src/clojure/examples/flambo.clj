@@ -1,4 +1,4 @@
-(ns examples.flambo
+(ns ^{:skip-aot true} examples.flambo
   (:require [flambo.conf :as conf]
             [flambo.api :as f]
             [flambo.tuple :as ft]
@@ -10,8 +10,7 @@
             [multiset.core :as ms]
 
             [clj-time.format :as ftime]
-            [clj-time.core :as time]
-            )
+            [clj-time.core :as time])
   (:import [examples RedisReceiver]
            [org.apache.spark.streaming StateSpec]
            [org.apache.spark.api.java JavaPairRDD]

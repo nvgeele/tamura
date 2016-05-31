@@ -17,10 +17,13 @@
 
 ;;;; SET-UP & CONFIG ;;;;
 
-(def local true)
+(def local false)
 (def config (-> (conf/spark-conf)
                 (conf/app-name "sparky")))
-(def sc (f/spark-context (if local (conf/master config "local[*]") config)))
+(def sc (f/spark-context
+          (if local
+            (conf/master config "local[*]")
+            (conf/master config "spark://nvgeele.be:7077"))))
 
 (declare ^:dynamic ^:private *coordinator*)
 
@@ -503,7 +506,7 @@
       (println "Let's go!")))
 
   (comment)
-  (let [r1 (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
+  (let [r1 (redis "134.184.49.17" "bxlqueue" :key :user-id :buffer 2)
         r2 (filter-key-size r1 2)
         r3 (reduce-by-key r2
                           #(let [t1 (ftime/parse (:time %1))

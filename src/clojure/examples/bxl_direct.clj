@@ -5,7 +5,7 @@
             [clj-time.format :as f])
   (:import [redis.clients.jedis JedisPool Jedis]))
 
-(def redis-host "localhost")
+(def redis-host "134.184.49.17")
 (def redis-key "bxlqueue")
 
 (defn calculate-direction
@@ -20,22 +20,23 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
-(t/defsig max-direction (-> (t/redis redis-host redis-key :key :user-id :buffer 2)
-                            (t/filter-key-size 2)
-                            (t/reduce-by-key #(let [t1 (f/parse (:time %1))
-                                                    t2 (f/parse (:time %2))]
-                                               (if (time/before? t1 t2)
-                                                 (calculate-direction (:position %2) (:position %1))
-                                                 (calculate-direction (:position %1) (:position %2)))))
-                            (t/hash-to-multiset)
-                            (t/map second)
-                            (t/multiplicities)
-                            (t/reduce (fn [t1 t2]
-                                        (let [[d1 c1] t1
-                                              [d2 c2] t2]
-                                          (if (> c1 c2) t1 t2)))
-                                      [nil -1])))
-(t/print-signal (t/throttle max-direction 1000))
+(comment
+  (t/defsig max-direction (-> (t/redis redis-host redis-key :key :user-id :buffer 2)
+                              (t/filter-key-size 2)
+                              (t/reduce-by-key #(let [t1 (f/parse (:time %1))
+                                                      t2 (f/parse (:time %2))]
+                                                 (if (time/before? t1 t2)
+                                                   (calculate-direction (:position %2) (:position %1))
+                                                   (calculate-direction (:position %1) (:position %2)))))
+                              (t/hash-to-multiset)
+                              (t/map second)
+                              (t/multiplicities)
+                              (t/reduce (fn [t1 t2]
+                                          (let [[d1 c1] t1
+                                                [d2 c2] t2]
+                                            (if (> c1 c2) t1 t2)))
+                                        [nil -1])))
+  (t/print-signal (t/throttle max-direction 1000)))
 
 ;;;;;;;;;;;;;;;
 
