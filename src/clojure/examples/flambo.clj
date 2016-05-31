@@ -14,7 +14,8 @@
             )
   (:import [examples RedisReceiver]
            [org.apache.spark.streaming StateSpec]
-           [org.apache.spark.api.java JavaPairRDD]))
+           [org.apache.spark.api.java JavaPairRDD]
+           [java.util LinkedList]))
 
 ;; SPARK (STREAMING) SETUP ;;
 
@@ -332,6 +333,14 @@
       (println "Method Name: " (.getName m))
       (println "Return Type: " (.getReturnType m) "\n"))))
 
+(defn process-streamed
+  [rdd]
+  (let [l (LinkedList.)]
+    (.add l rdd)
+    (-> (.queueStream ssc l)
+        (fs/map inc)
+        (fs/print))))
+
 (defn -main
   [& args]
   (comment
@@ -347,31 +356,70 @@
   ;(.start ssc)
   ;(.awaitTermination ssc)
 
-  (let [input (redis "localhost" "test-hash" :key :id)
-        state (:stream input)
-        input (fs/map-to-pair (:state input) identity)
-        grouped (.cogroup input state)]
-    (.print state)
-    (.print (.transformToPair grouped
-                              (fn/function
-                                (fn [rdd]
-                                  (let [changed? (f/aggregate rdd false
-                                                              (fn [acc v]
-                                                                (let [input-vals (._1 (._2 v))]
-                                                                  (or (boolean acc)
-                                                                      (not (boolean (.isEmpty input-vals))))))
-                                                              (fn [l r]
-                                                                (or l r)))]
-                                    (comment (println "changed?:" changed?))
-                                    (if changed?
-                                      (f/flat-map-to-pair rdd (fn [v]
-                                                                (let [key (._1 v)
-                                                                      state-vals (._2 (._2 v))]
-                                                                  (map ft/tuple (repeat key) state-vals))))
-                                      (JavaPairRDD/fromJavaRDD (.emptyRDD sc))))))))
+  (process-streamed (f/parallelize sc [1 2 3]))
 
-    (.start ssc)
-    (.awaitTermination ssc))
+  (.start ssc)
+
+  (process-streamed (f/parallelize sc [4 5 6]))
+
+  (.awaitTermination ssc)
+
+  (comment
+    (-> (f/parallelize sc [{:a 1} {:b 2}])
+        ;(f/map vals)
+        (f/collect)
+        (println))
+
+    (let [l [(f/parallelize sc [1 2 3])
+             (f/parallelize sc [4 5 6])
+             (f/parallelize sc [7 8 9])]]))
+
+  ;; NOTE: RDDs preserve order
+
+  (comment
+    (let [input (redis "localhost" "test-hash" :key :id)]
+      (.foreachRDD (:state input)
+                   (fn/void-function
+                     (fn [rdd]
+                       ;(println (type rdd))
+                       ;(print-methods rdd)
+
+                       (println (.id rdd))
+                       ;(println (.first rdd))
+                       (println (.hashCode rdd))
+                       (println (.name rdd))
+
+                       ;(System/exit 0)
+                       )))
+      (.start ssc)
+      (.awaitTermination ssc)))
+
+  (comment
+    (let [input (redis "localhost" "test-hash" :key :id)
+          state (:stream input)
+          input (fs/map-to-pair (:state input) identity)
+          grouped (.cogroup input state)]
+      (.print state)
+      (.print (.transformToPair grouped
+                                (fn/function
+                                  (fn [rdd]
+                                    (let [changed? (f/aggregate rdd false
+                                                                (fn [acc v]
+                                                                  (let [input-vals (._1 (._2 v))]
+                                                                    (or (boolean acc)
+                                                                        (not (boolean (.isEmpty input-vals))))))
+                                                                (fn [l r]
+                                                                  (or l r)))]
+                                      (comment (println "changed?:" changed?))
+                                      (if changed?
+                                        (f/flat-map-to-pair rdd (fn [v]
+                                                                  (let [key (._1 v)
+                                                                        state-vals (._2 (._2 v))]
+                                                                    (map ft/tuple (repeat key) state-vals))))
+                                        (JavaPairRDD/fromJavaRDD (.emptyRDD sc))))))))
+
+      (.start ssc)
+      (.awaitTermination ssc)))
 
   (comment
     (let [complete (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
