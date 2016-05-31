@@ -26,11 +26,13 @@
 
 ;;;; HELPERS ;;;;
 
-(defmacro println*
+(def ^:private print-lock (Object.))
+
+(defn println*
   [& args]
-  (comment
-    `(locking *out*
-       (apply println ~(vec args)))))
+  #_(locking print-lock
+    (apply println args))
+  (apply println args))
 
 (defn emptyRDD
   []
@@ -133,7 +135,7 @@
 
         {:destination id :value value}
         (do (when started?
-              (println* "Coordinator forwarded something")
+              ;(println* "Coordinator forwarded something")
               (doseq [source sources]
                 (>! source msg)))
             (recur (<! in) started? sources))
@@ -155,16 +157,20 @@
 
 (defn parallelize-multiset
   [ms]
-  (let [ms (seq (to-multiset ms))]
-    (f/parallelize sc ms)))
+  (if (multiset-empty? ms)
+    (emptyRDD)
+    (let [ms (seq (to-multiset ms))]
+      (f/parallelize sc ms))))
 
 (defn parallelize-hash
   [hash]
-  (let [hash (to-hash hash)]
-    (->> (mapcat (fn [[k ms]]
-                  (map ft/tuple (repeat k) ms))
-                hash)
-         (f/parallelize-pairs sc))))
+  (if (hash-empty? hash)
+    (emptyRDD)
+    (let [hash (to-hash hash)]
+      (->> (mapcat (fn [[k ms]]
+                     (map ft/tuple (repeat k) ms))
+                   hash)
+           (f/parallelize-pairs sc)))))
 
 (defn collect-multiset
   [rdd]
@@ -204,7 +210,7 @@
                           :else
                           (if (= return-type :multiset) (make-multiset) (make-hash)))]
       (log/debug (str "source " id " has received: " (seq msg)))
-      (println* "Source" id "received something")
+      ;(println* "Source" id "received something:" msg)
       (match msg
         {:subscribe subscriber}
         (recur (<! in) (cons subscriber subs) value)
@@ -213,7 +219,7 @@
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))]
-          (println* "Source" id "is propagating")
+          ;(println* "Source" id "is propagating")
           (send-subscribers subs true (transformer new-coll) id)
           (recur (<! in) subs new-coll))
 
@@ -238,7 +244,7 @@
             value (if key
                     [(get parsed key) (dissoc parsed key)]
                     parsed)]
-        (println* "Redis received something")
+        ;(println* "Redis received something")
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur)))
     source-node))
@@ -252,9 +258,9 @@
     (go-loop [msgs (map <!! inputs)
               value (emptyRDD)]
       (log/debug (str "union-node " id " has received: " msgs))
-      (println* "union" id "received something")
       (if (ormap :changed? msgs)
-        (let [value value]
+        (let [value (f/union (:value (first msgs))
+                             (:value (second msgs)))]
           (send-subscribers @subscribers true value id)
           (recur (map <!! inputs) value))
         (do (send-subscribers @subscribers false value id)
@@ -286,7 +292,7 @@
                     collect-hash
                     collect-multiset)]
     (go-loop [msg (<! input)]
-      (println* "print*" id "has received something")
+      ;(println* "print*" id "has received something")
       (when (:changed? msg)
         (-> (:value msg)
             (collector)
@@ -295,38 +301,10 @@
 
 (defn -main
   [& args]
-
-  (comment
-    (-> (union (f/parallelize sc [1 2 3 4])
-               (f/parallelize sc [5 6 7 8]))
-        (print*))
-
-    (-> (make-hash)
-        (hash-insert :a 1)
-        (hash-insert :b 1)
-        (hash-insert :a 2)
-        (hash-insert :b 2)
-        (parallelize-hash)
-        (collect-hash)
-        (pprint))
-
-    (-> (make-multiset)
-        (multiset-insert 1)
-        (multiset-insert 3)
-        (multiset-insert 4)
-        (multiset-insert 5)
-        (parallelize-multiset)
-        (collect-multiset)
-        (pprint)))
-
-  (let [l (redis "localhost" "q1")
-        ;r (redis "localhost" "q2")
-        ;u (union l r)
-        k (redis "localhost" "h1" :key :id)
-        ]
-    ;(print* u)
-    (print* l)
-    (print* k)
+  (let [l (redis "localhost" "q1" :buffer 2)
+        r (redis "localhost" "q2")
+        u (union l r)]
+    (print* u)
     (start!)
     (println "Let's go!"))
 

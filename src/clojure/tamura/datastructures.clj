@@ -204,6 +204,7 @@
 ;; TODO: tests for hash-filter-key-size
 ;; TODO: tests for hash-reduce-by-key
 (defprotocol HashBasic
+  (hash-empty? [h])
   (hash-get [h key])
   (hash-insert [h key val])
   (hash-remove [h key])
@@ -229,6 +230,8 @@
 
 (deftype HashImpl [hash init inserted removed]
   HashBasic
+  (hash-empty? [h]
+    (empty? hash))
   (hash-get [h key]
     (get hash key))
   (hash-insert [h key val]
@@ -314,6 +317,8 @@
 ;; TODO: do we need to filter the pm in hash-remove ?
 (deftype TimedHash [hash timeout pm inserted removed]
   HashBasic
+  (hash-empty? [h]
+    (hash-empty? hash))
   (hash-get [h key]
     (hash-get hash key))
   (hash-insert [h key val]
