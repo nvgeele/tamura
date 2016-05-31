@@ -39,13 +39,9 @@
   :java-source-paths ["src/java"]
 
   :profiles {:dev
-             {:aot [
-                    ;examples.flambo
-                    examples.sparky
-                    ;examples.sparkling
-                    ;examples.general
-                    ]}}
+             {:aot [examples.sparky]}
+             :uberjar
+             {:aot :all}}
 
-  :main ^:skip-aot tamura.core
-
+  ;; :main ^:skip-aot tamura.core
   )
