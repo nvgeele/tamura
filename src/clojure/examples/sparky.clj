@@ -64,9 +64,15 @@
   [bindings & body]
   `(thread (loop ~bindings ~@body)))
 
+(def throttle? (atom false))
+
 (defn start!
   []
   (Thread/sleep 1000)
+  (threadloop []
+    (Thread/sleep @throttle?)
+    (>!! (:in *coordinator*) :heartbeat)
+    (recur))
   (>!! (:in *coordinator*) :start))
 
 (defn- started?
@@ -76,6 +82,13 @@
               (<!! c))]
     (a/close! c)
     s))
+
+;; TODO: check bounds
+(defn set-throttle!
+  [ms]
+  (if (started?)
+    (throw (Exception. "Can not enable throttling whilst already started"))
+    (reset! throttle? ms)))
 
 (defn register-source!
   [source]
@@ -120,38 +133,43 @@
 (defrecord Source [id node-type return-type sub-chan in]) ;; isa Node
 (defrecord Sink [id node-type])                           ;; isa Node
 
-;; TODO: like Spark Streaming, do micro-batching
 (defn make-coordinator
   []
   (let [in (chan)]
     (go-loop [msg (<! in)
               started? false
-              sources []]
+              sources []
+              changes? false]
       (log/debug (str "coordinator received: " msg))
       (match msg
         {:new-source source-chan}
         (if started?
           (throw (Exception. "can not add new sources when already running"))
-          (recur (<! in) started? (cons source-chan sources)))
+          (recur (<! in) started? (cons source-chan sources) changes?))
 
         {:destination id :value value}
         (do (when started?
-              ;(println* "Coordinator forwarded something")
               (doseq [source sources]
                 (>! source msg)))
-            (recur (<! in) started? sources))
+            (recur (<! in) started? sources true))
 
         {:started? reply-channel}
         (do (>! reply-channel started?)
-            (recur (<! in) started? sources))
+            (recur (<! in) started? sources changes?))
 
-        :start (recur (<! in) true sources)
+        :heartbeat
+        (do (when (and started? @throttle?)
+              (doseq [source sources]
+                (>! source :heartbeat)))
+            (recur (<! in) started? sources false))
 
-        :stop (recur (<! in) false [])
+        :start (recur (<! in) true sources false)
 
-        :reset (recur (<! in) false [])
+        :stop (recur (<! in) false [] false)
 
-        :else (recur (<! in) started? sources)))
+        :reset (recur (<! in) false [] false)
+
+        :else (recur (<! in) started? sources changes?)))
     (Coordinator. in)))
 
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
@@ -209,26 +227,34 @@
                             (make-timed-multiset timeout)
                             (make-timed-hash timeout))
                           :else
-                          (if (= return-type :multiset) (make-multiset) (make-hash)))]
+                          (if (= return-type :multiset) (make-multiset) (make-hash)))
+              changes? false]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
         {:subscribe subscriber}
-        (recur (<! in) (cons subscriber subs) value)
+        (recur (<! in) (cons subscriber subs) value changes?)
 
         {:destination id :value new-value}
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))]
-          (send-subscribers subs true (transformer new-coll) id)
-          (recur (<! in) subs new-coll))
+          (when-not @throttle?
+            (send-subscribers subs true (transformer new-coll) id))
+          (recur (<! in) subs new-coll true))
 
         ;; TODO: memoize transformer
         {:destination _}
-        (do (send-subscribers subs false (transformer value) id)
-            (recur (<! in) subs value))
+        (do (when-not @throttle?
+              (send-subscribers subs false (transformer value) id))
+            (recur (<! in) subs value changes?))
+
+        :heartbeat
+        (do (when @throttle?
+              (send-subscribers subs changes? (transformer value) id))
+            (recur (<! in) subs value false))
 
         ;; TODO: error?
-        :else (recur (<! in) subs value)))
+        :else (recur (<! in) subs value changes?)))
     (let [source-node (Source. id ::source return-type in in)]
       (register-source! source-node)
       source-node)))
@@ -453,14 +479,21 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
-(comment
-  lpush bxlqueue "{:user-id 1, :position [0.41497792244969556 0.49798402446719936], :time \"2016-05-28T14:48:51.331Z\"}" "{:user-id 2, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}" "{:user-id 3, :position [0.4113255447899179 0.4653541009535579], :time \"2016-05-28T14:48:51.383Z\"}"
-
-  lpush bxlqueue "{:user-id 1, :position [0.018471146703515684 0.07674546533119342], :time \"2016-05-28T14:49:51.387Z\"}" "{:user-id 2, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}" "{:user-id 3, :position [0.30995492659752755 0.7706770106817055], :time \"2016-05-28T14:49:51.328Z\"}"
-  )
+;; TODO: delay
+;; TODO: buffer
+;; TODO: diff-add
+;; TODO: diff-remove
 
 (defn -main
   [& args]
+
+  (comment
+    (let [r (redis "localhost" "q1")]
+      (print* r)
+      (set-throttle! 1000)
+      (start!)
+      (println "Let's go")))
+
   (comment
     (let [l (redis "localhost" "q1" :buffer 2)
           r (redis "localhost" "q2")
@@ -486,5 +519,6 @@
                                [d2 c2] t2]
                            (if (> c1 c2) t1 t2))))]
     (print* r7)
+    (set-throttle! 1000)
     (start!)
     (println "Let's go!")))
