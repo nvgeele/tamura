@@ -211,7 +211,6 @@
                           :else
                           (if (= return-type :multiset) (make-multiset) (make-hash)))]
       (log/debug (str "source " id " has received: " (seq msg)))
-      ;(println* "Source" id "received something:" msg)
       (match msg
         {:subscribe subscriber}
         (recur (<! in) (cons subscriber subs) value)
@@ -220,7 +219,6 @@
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))]
-          ;(println* "Source" id "is propagating")
           (send-subscribers subs true (transformer new-coll) id)
           (recur (<! in) subs new-coll))
 
@@ -245,7 +243,6 @@
             value (if key
                     [(get parsed key) (dissoc parsed key)]
                     parsed)]
-        ;(println* "Redis received something")
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur)))
     source-node))
@@ -311,6 +308,7 @@
             (recur (<! input) value))))
     (Node. id ::reduce-by-key :hash sub-chan)))
 
+;; TODO: just use make-map-node
 (defn make-hash-to-multiset-node
   [id [] [input-node]]
   (let [sub-chan (chan)
@@ -328,6 +326,24 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (Node. id ::hash-to-multiset :multiset sub-chan)))
+
+(defn make-map-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "map node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map f))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::map :multiset sub-chan)))
 
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
@@ -347,7 +363,6 @@
                     collect-hash
                     collect-multiset)]
     (go-loop [msg (<! input)]
-      ;(log/error "print*" id "has received something")
       (when (:changed? msg)
         (-> (:value msg)
             (collector)
@@ -367,7 +382,10 @@
   [input]
   (make-hash-to-multiset-node (new-id!) [] [input]))
 
-(defmacro map* [input f] input)
+(defn map*
+  [input f]
+  (make-map-node (new-id!) [f] [input]))
+
 (defmacro multiplicities [input] input)
 (defmacro reduce* [input fn] input)
 
