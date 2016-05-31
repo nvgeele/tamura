@@ -1,4 +1,4 @@
-(ns ^{:skip-aot true} examples.flambo
+(ns examples.flambo
   (:require [flambo.conf :as conf]
             [flambo.api :as f]
             [flambo.tuple :as ft]
