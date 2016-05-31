@@ -40,8 +40,10 @@
 
   :profiles {:dev
              {:aot [
-                    examples.flambo
+                    ;examples.flambo
+                    examples.sparky
                     ;examples.sparkling
+                    ;examples.general
                     ]}}
 
   :main ^:skip-aot tamura.core
