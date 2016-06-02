@@ -467,6 +467,39 @@
             (recur (<! input) value))))
     (Node. id ::reduce :multiset sub-chan)))
 
+(defn make-buffer-node
+  [id [size] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        hash? (= (:return-type input-node) :hash)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              previous nil
+              buffer (if hash? (make-buffered-hash size) (make-buffered-multiset size))
+              rdd (emptyRDD)]
+      (log/debug (str "buffer node " id " has received: " msg))
+      (cond (and (:changed? msg) hash?)
+            (let [removed (hash-removed (:collection msg))
+                  inserted (hash-inserted (:collection msg))
+                  buffer (hash-insert-and-remove buffer inserted removed)
+                  rdd (parallelize-hash buffer)]
+              (send-subscribers* @subscribers true rdd buffer id)
+              (recur (<! input) (:collection msg) buffer rdd))
+
+            (:changed? msg)
+            (let [new (multiset-inserted (:collection msg))
+                  removed (multiset-removed (:collection msg))
+                  buffer (multiset-insert-and-remove buffer new removed)
+                  rdd (parallelize-multiset buffer)]
+              (send-subscribers* @subscribers true rdd buffer id)
+              (recur (<! input) (:collection msg) buffer rdd))
+
+            :else
+            (do (send-subscribers* @subscribers false rdd buffer id)
+                (recur (<! input) previous buffer rdd))))
+    (Node. id ::buffer (:return-type input-node) sub-chan)))
+
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
   (let [id (new-id!)]
@@ -517,6 +550,10 @@
   [input fn]
   (make-reduce-node (new-id!) [fn false] [input]))
 
+(defn buffer
+  [input size]
+  (make-buffer-node (new-id!) [size] [input]))
+
 ;; TODO: delay
 ;; TODO: buffer
 ;; TODO: diff-add
@@ -551,8 +588,9 @@
                  :master "local[*]"})
 
   (comment)
-  (let [r (redis "localhost" "q1")]
-    (print* r)
+  (let [r (redis "localhost" "q1")
+        b (buffer r 3)]
+    (print* b)
     ;(set-throttle! 1000)
     (start!)
     (println "Let's go"))
