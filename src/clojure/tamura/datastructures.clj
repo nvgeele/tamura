@@ -385,12 +385,13 @@
           removed (concat removed (hash-removed hash))]
       (TimedHash. hash timeout new-pm [[key val]] removed)))
   (hash-remove [h key]
-    (let [hash (hash-remove hash key)
-          pm (filter (fn [[[k v] t]] (not (= k key))) pm)]
+    (let [vals (hash-get hash key)
+          hash (hash-remove hash key)
+          pm (reduce #(dissoc %1 [key %2]) pm (to-multiset vals))]
       (TimedHash. hash timeout pm [] (hash-removed hash))))
   (hash-remove-element [h key val]
     (let [hash (hash-remove-element hash key val)
-          pm (filter (fn [[[k v] t]] (not (and (= k key) (= v val)))) pm)]
+          pm (dissoc pm [key val])]
       (TimedHash. hash timeout pm [] (hash-removed hash))))
   (hash-insert-and-remove [this to-insert to-remove]
     (let [[hi rmi] (reduce (fn [[h removed] [k v]]
