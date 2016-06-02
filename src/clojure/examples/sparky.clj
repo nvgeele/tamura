@@ -18,15 +18,19 @@
 
 ;;;; SET-UP & CONFIG ;;;;
 
-(def local false)
-(def config (-> (conf/spark-conf)
-                (conf/app-name "sparky")))
-(def sc (f/spark-context
-          (if local
-            (conf/master config "local[*]")
-            (conf/master config "spark://localhost:7077"))))
+(declare ^:private ^org.apache.spark.api.java.JavaSparkContext sc)
 
 (declare ^:dynamic ^:private *coordinator*)
+
+(defn setup-spark!
+  [& [config]]
+  (alter-var-root
+    (var sc)
+    (fn [& args]
+      (-> (conf/spark-conf)
+          (conf/app-name (get :app-name config "tamura-app"))
+          (conf/master (get :master config "local[*]"))
+          (f/spark-context)))))
 
 ;;;; HELPERS ;;;;
 
@@ -499,6 +503,15 @@
   [input fn]
   (make-reduce-node (new-id!) [fn false] [input]))
 
+;; TODO: delay
+;; TODO: buffer
+;; TODO: diff-add
+;; TODO: diff-remove
+
+;; TODO: filter
+;; TODO: filter-by-key
+;; TODO: map-by-key
+
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
   (let [y (* (Math/sin (- cur_lon pre_lon)) (Math/cos cur_lat))
@@ -511,16 +524,17 @@
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
 
-;; TODO: delay
-;; TODO: buffer
-;; TODO: diff-add
-;; TODO: diff-remove
+(def redis-host "localhost")
+;(def redis-host "134.184.49.17")
+(def redis-key "bxlqueue")
+
+;; TODO: (future work) type hints
 
 (defn -main
   [& args]
 
-  (def spark-conf {:host ""
-                   :throttle 1000})
+  (setup-spark! {:app-name "sparky"
+                 :master "local[*]"})
 
   (comment
     (let [r (redis "localhost" "q1")]
@@ -544,23 +558,24 @@
         (calculate-direction (:position %2) (:position %1))
         (calculate-direction (:position %1) (:position %2)))))
 
-  (let [r1 (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
-        r2 (filter-key-size r1 2)
-        r3 (reduce-by-key r2
-                          (f/fn [l r]
-                            (let [t1 (ftime/parse (:time l))
-                                  t2 (ftime/parse (:time r))]
-                              (if (time/before? t1 t2)
-                                (calculate-direction (:position r) (:position l))
-                                (calculate-direction (:position l) (:position r))))))
-        r4 (hash-to-multiset r3)
-        r5 (map* r4 (f/fn [t] (second t)))
-        r6 (multiplicities r5)
-        r7 (reduce* r6 (f/fn [t1 t2]
-                         (let [[d1 c1] t1
-                               [d2 c2] t2]
-                           (if (> c1 c2) t1 t2))))]
-    (print* r7)
-    (set-throttle! 1000)
-    (start!)
-    (println "Let's go!")))
+  (comment
+    (let [r1 (redis redis-host redis-key :key :user-id :buffer 2)
+          r2 (filter-key-size r1 2)
+          r3 (reduce-by-key r2
+                            (f/fn [l r]
+                              (let [t1 (ftime/parse (:time l))
+                                    t2 (ftime/parse (:time r))]
+                                (if (time/before? t1 t2)
+                                  (calculate-direction (:position r) (:position l))
+                                  (calculate-direction (:position l) (:position r))))))
+          r4 (hash-to-multiset r3)
+          r5 (map* r4 (f/fn [t] (second t)))
+          r6 (multiplicities r5)
+          r7 (reduce* r6 (f/fn [t1 t2]
+                           (let [[d1 c1] t1
+                                 [d2 c2] t2]
+                             (if (> c1 c2) t1 t2))))]
+      (print* r7)
+      (set-throttle! 1000)
+      (start!)
+      (println "Let's go!"))))
