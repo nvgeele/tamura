@@ -108,6 +108,11 @@
   `(doseq [sub# ~subscribers]
      (>! sub# {:changed? ~changed? :value ~value :from ~id})))
 
+(defmacro send-subscribers*
+  [subscribers changed? rdd collection id]
+  `(doseq [sub# ~subscribers]
+     (>! sub# {:changed? ~changed? :value ~rdd :collection ~collection :from ~id})))
+
 (defmacro node-subscribe
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
@@ -268,18 +273,18 @@
           (if @throttle?
             (recur (<! in) subs new-coll rdd true)
             (let [rdd (parallelize new-coll)]
-              (send-subscribers subs true rdd id)
+              (send-subscribers* subs true rdd new-coll id)
               (recur (<! in) subs new-coll rdd false))))
 
         {:destination _}
         (do (when-not @throttle?
-              (send-subscribers subs false rdd id))
+              (send-subscribers* subs false rdd value id))
             (recur (<! in) subs value rdd changes?))
 
         :heartbeat
         (if @throttle?
           (let [rdd (parallelize value)]
-            (send-subscribers subs changes? rdd id)
+            (send-subscribers* subs changes? rdd value id)
             (recur (<! in) subs value rdd false))
           (recur (<! in) subs value rdd changes?))
 
