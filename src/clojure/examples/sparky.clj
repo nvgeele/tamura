@@ -77,10 +77,11 @@
 (defn start!
   []
   (Thread/sleep 1000)
-  (threadloop []
-    (Thread/sleep @throttle?)
-    (>!! (:in *coordinator*) :heartbeat)
-    (recur))
+  (if-let [t @throttle?]
+    (threadloop []
+      (Thread/sleep t)
+      (>!! (:in *coordinator*) :heartbeat)
+      (recur)))
   (>!! (:in *coordinator*) :start))
 
 (defn- started?
@@ -213,6 +214,12 @@
                    hash)
            (f/parallelize-pairs sc)))))
 
+(defn parallelize
+  [c]
+  (cond (multiset? c) (parallelize-multiset c)
+        (hash? c) (parallelize-hash c)
+        :else (throw (Exception. "type not supported"))))
+
 (defn collect-multiset
   [rdd]
   (let [c (f/collect rdd)]
@@ -229,10 +236,7 @@
 
 (defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
-  (let [in (chan)
-        transformer (if (= return-type :multiset)
-                      parallelize-multiset
-                      parallelize-hash)]
+  (let [in (chan)]
     (go-loop [msg (<! in)
               subs []
               value (cond (and buffer timeout)
@@ -249,33 +253,38 @@
                             (make-timed-hash timeout))
                           :else
                           (if (= return-type :multiset) (make-multiset) (make-hash)))
+              rdd (emptyRDD)
               changes? false]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
         {:subscribe subscriber}
-        (recur (<! in) (cons subscriber subs) value changes?)
+        (recur (<! in) (cons subscriber subs) value rdd changes?)
 
         {:destination id :value new-value}
         (let [new-coll (if (= return-type :multiset)
                          (multiset-insert value new-value)
                          (hash-insert value (first new-value) (second new-value)))]
-          (when-not @throttle?
-            (send-subscribers subs true (transformer new-coll) id))
-          (recur (<! in) subs new-coll true))
 
-        ;; TODO: memoize transformer
+          (if @throttle?
+            (recur (<! in) subs new-coll rdd true)
+            (let [rdd (parallelize new-coll)]
+              (send-subscribers subs true rdd id)
+              (recur (<! in) subs new-coll rdd false))))
+
         {:destination _}
         (do (when-not @throttle?
-              (send-subscribers subs false (transformer value) id))
-            (recur (<! in) subs value changes?))
+              (send-subscribers subs false rdd id))
+            (recur (<! in) subs value rdd changes?))
 
         :heartbeat
-        (do (when @throttle?
-              (send-subscribers subs changes? (transformer value) id))
-            (recur (<! in) subs value false))
+        (if @throttle?
+          (let [rdd (parallelize value)]
+            (send-subscribers subs changes? rdd id)
+            (recur (<! in) subs value rdd false))
+          (recur (<! in) subs value rdd changes?))
 
         ;; TODO: error?
-        :else (recur (<! in) subs value changes?)))
+        :else (recur (<! in) subs value rdd changes?)))
     (let [source-node (Source. id ::source return-type in in)]
       (register-source! source-node)
       source-node)))
@@ -536,12 +545,12 @@
   (setup-spark! {:app-name "sparky"
                  :master "local[*]"})
 
-  (comment
-    (let [r (redis "localhost" "q1")]
-      (print* r)
-      (set-throttle! 1000)
-      (start!)
-      (println "Let's go")))
+  (comment)
+  (let [r (redis "localhost" "q1")]
+    (print* r)
+    ;(set-throttle! 1000)
+    (start!)
+    (println "Let's go"))
 
   (comment
     (let [l (redis "localhost" "q1" :buffer 2)

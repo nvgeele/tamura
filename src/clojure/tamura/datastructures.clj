@@ -199,6 +199,9 @@
 (defn make-timed-buffered-multiset
   [timeout size]
   (make-timed-multiset timeout (make-buffered-multiset size)))
+(defn multiset?
+  [x]
+  (satisfies? MultiSetBasic x))
 
 ;; TODO: hash-get-latest
 ;; TODO: tests for hash-filter-key-size
@@ -396,3 +399,6 @@
 (defn make-timed-buffered-hash
   [timeout size]
   (TimedHash. (make-buffered-hash size) timeout (pm/priority-map) [] []))
+(defn hash?
+  [x]
+  (satisfies? HashBasic x))
