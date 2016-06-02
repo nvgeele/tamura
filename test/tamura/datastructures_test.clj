@@ -30,7 +30,15 @@
       (do-op d/multiset-remove 3) => (ms/multiset 1 2 3)
       (do-fn d/multiset-removed) => [3]
       (do-op d/multiset-remove 4) => (ms/multiset 1 2 3)
-      (do-fn d/multiset-removed) => []))
+      (do-fn d/multiset-removed) => []
+      (do-op d/multiset-copy)
+      (do-op d/multiset-insert* 1)
+      (do-op d/multiset-insert* 2)
+      (do-op d/multiset-insert* 3)
+      (do-op d/multiset-remove* 3)
+      (do-op d/multiset-remove* 2)
+      (do-fn d/multiset-inserted) => [1 2 3]
+      (do-fn d/multiset-removed) => [3 2]))
   (facts "about buffered multisets"
     (test-with (d/make-buffered-multiset 3)
       (do-op d/multiset-insert 1) => (ms/multiset 1)
@@ -44,7 +52,14 @@
       (do-op d/multiset-remove 2) => (ms/multiset 2 3)
       (do-op d/multiset-insert 1) => (ms/multiset 1 2 3)
       (do-op d/multiset-insert 1) => (ms/multiset 1 1 2)
-      (do-fn d/multiset-removed) => [3]))
+      (do-fn d/multiset-removed) => [3]
+      (do-op d/multiset-copy)
+      (do-op d/multiset-insert* 6)
+      (do-op d/multiset-insert* 7)
+      (do-op d/multiset-insert* 8)
+      (do-op d/multiset-remove* 8)
+      (do-fn d/multiset-inserted) => [6 7 8]
+      (do-fn d/multiset-removed) => [2 1 1 8]))
   (facts "about timed multisets"
     (test-with (d/make-timed-multiset (t/seconds 2))
       (do-op d/multiset-insert 1) => (ms/multiset 1)
@@ -54,7 +69,13 @@
       (do-op d/multiset-insert 3) => (ms/multiset 2 3)
       (Thread/sleep 3000)
       (do-op d/multiset-insert 4) => (ms/multiset 4)
-      (do-fn d/multiset-removed) => [2 3]))
+      (do-fn d/multiset-removed) => [2 3]
+      (do-op d/multiset-copy)
+      (Thread/sleep 2100)
+      (do-op d/multiset-insert* 5)
+      (do-op d/multiset-insert* 6)
+      (do-fn d/multiset-inserted) => [5 6]
+      (do-fn d/multiset-removed) => [4]))
   (facts "about buffered & timed multisets"
     (test-with (d/make-timed-multiset (t/seconds 2) (d/make-buffered-multiset 2))
       (do-op d/multiset-insert 1) => (ms/multiset 1)
@@ -67,7 +88,14 @@
       (do-op d/multiset-insert 5) => (ms/multiset 4 5)
       (Thread/sleep 2100)
       (do-op d/multiset-insert 1) => (ms/multiset 1)
-      (do-fn d/multiset-removed) => [4 5])))
+      (do-fn d/multiset-removed) => [4 5]
+      (do-op d/multiset-copy)
+      (Thread/sleep 2100)
+      (do-op d/multiset-insert* 5)
+      (do-op d/multiset-insert* 6)
+      (do-op d/multiset-insert* 7)
+      (do-fn d/multiset-inserted) => [5 6 7]
+      (do-fn d/multiset-removed) => [1 5])))
 
 (facts "about hashes"
   (facts "about regular hashes"

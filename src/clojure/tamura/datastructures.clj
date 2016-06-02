@@ -13,16 +13,20 @@
           (and (= (peek items) val) switch?) (recur (pop items) buffer false)
           :else (recur (pop items) (conj buffer (peek items)) switch?))))
 
+;; NOTE: multiset-copy makes a soft copy, but with empty inserted/removed lists
 (defprotocol MultiSetBasic
   (multiset-insert [this val])
   (multiset-remove [this val])
+  (multiset-insert* [this val])
+  (multiset-remove* [this val])
   (multiset-empty? [this])
   (multiset-count [this])
   (multiset-insert-and-remove [this to-insert to-remove])
   (multiset-inserted [this])
   (multiset-removed [this])
   (to-multiset [this])
-  (to-regular-multiset [this]))
+  (to-regular-multiset [this])
+  (multiset-copy [this]))
 
 ;; TODO: tests for reduce
 ;; TODO: tests for multiset-map
@@ -46,6 +50,12 @@
     (if (contains? ms val)
       (RegularMultiSet. (disj ms val) [] [val])
       (RegularMultiSet. ms [] [])))
+  (multiset-insert* [this val]
+    (RegularMultiSet. (conj ms val) (conj inserted val) removed))
+  (multiset-remove* [this val]
+    (if (contains? ms val)
+      (RegularMultiSet. (disj ms val) inserted (conj removed val))
+      (RegularMultiSet. ms inserted removed)))
   (multiset-empty? [this]
     (empty? ms))
   (multiset-count [this]
@@ -63,6 +73,8 @@
     ms)
   (to-regular-multiset [this]
     this)
+  (multiset-copy [this]
+    (RegularMultiSet. ms [] []))
 
   MultiSet
   (multiset-contains? [this val]
@@ -109,6 +121,20 @@
       (let [ms (multiset-remove ms val)]
         (BufferedMultiSet. ms size (buffer-remove-last buffer-list size val) [] (multiset-removed ms)))
       (BufferedMultiSet. ms size buffer-list [] [])))
+  (multiset-insert* [this val]
+    (let [ms (multiset-insert this val)]
+      (BufferedMultiSet. (.ms ms)
+                         size
+                         (.buffer-list ms)
+                         (concat inserted (.inserted ms))
+                         (concat removed (.removed ms)))))
+  (multiset-remove* [this val]
+    (let [ms (multiset-remove this val)]
+      (BufferedMultiSet. (.ms ms)
+                         size
+                         (.buffer-list ms)
+                         (concat inserted (.inserted ms))
+                         (concat removed (.removed ms)))))
   (multiset-empty? [this]
     (multiset-empty? ms))
   (multiset-count [this]
@@ -133,7 +159,9 @@
     (to-multiset ms))
   (to-regular-multiset [this]
     (let [ms (to-multiset ms)]
-      (RegularMultiSet. ms inserted removed))))
+      (RegularMultiSet. ms inserted removed)))
+  (multiset-copy [this]
+    (BufferedMultiSet. ms size buffer-list [] [])))
 
 (deftype TimedMultiSet [ms timeout pm inserted removed]
   MultiSetBasic
@@ -157,6 +185,20 @@
     (let [new-ms (multiset-remove ms val)
           new-pm (filter (fn [[v t]] (not (= v val))) pm)]
       (TimedMultiSet. new-ms timeout new-pm [] (multiset-removed new-ms))))
+  (multiset-insert* [this val]
+    (let [ms (multiset-insert this val)]
+      (TimedMultiSet. (.ms ms)
+                      timeout
+                      (.pm ms)
+                      (concat inserted (.inserted ms))
+                      (concat removed (.removed ms)))))
+  (multiset-remove* [this val]
+    (let [ms (multiset-remove this val)]
+      (TimedMultiSet. (.ms ms)
+                      timeout
+                      (.pm ms)
+                      (concat inserted (.inserted ms))
+                      (concat removed (.removed ms)))))
   (multiset-empty? [this]
     (multiset-empty? ms))
   (multiset-count [this]
@@ -181,7 +223,9 @@
     (to-multiset ms))
   (to-regular-multiset [this]
     (let [ms (to-multiset ms)]
-      (RegularMultiSet. ms inserted removed))))
+      (RegularMultiSet. ms inserted removed)))
+  (multiset-copy [this]
+    (TimedMultiSet. ms timeout pm [] [])))
 
 (defn make-multiset
   ([] (make-multiset (ms/multiset)))
