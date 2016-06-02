@@ -266,15 +266,17 @@
         (recur (<! in) (cons subscriber subs) value rdd changes?)
 
         {:destination id :value new-value}
-        (let [new-coll (if (= return-type :multiset)
-                         (multiset-insert value new-value)
-                         (hash-insert value (first new-value) (second new-value)))]
-
-          (if @throttle?
-            (recur (<! in) subs new-coll rdd true)
-            (let [rdd (parallelize new-coll)]
-              (send-subscribers* subs true rdd new-coll id)
-              (recur (<! in) subs new-coll rdd false))))
+        (if @throttle?
+          (let [new-coll (if (= return-type :multiset)
+                           (multiset-insert* value new-value)
+                           (hash-insert* value (first new-value) (second new-value)))]
+            (recur (<! in) subs new-coll rdd true))
+          (let [new-coll (if (= return-type :multiset)
+                           (multiset-insert value new-value)
+                           (hash-insert value (first new-value) (second new-value)))
+                rdd (parallelize new-coll)]
+            (send-subscribers* subs true rdd new-coll id)
+            (recur (<! in) subs new-coll rdd false)))
 
         {:destination _}
         (do (when-not @throttle?
@@ -283,9 +285,12 @@
 
         :heartbeat
         (if @throttle?
-          (let [rdd (parallelize value)]
+          (let [new-value (if (= return-type :multiset)
+                            (multiset-copy value)
+                            (hash-copy value))
+                rdd (parallelize value)]
             (send-subscribers* subs changes? rdd value id)
-            (recur (<! in) subs value rdd false))
+            (recur (<! in) subs new-value rdd false))
           (recur (<! in) subs value rdd changes?))
 
         ;; TODO: error?
@@ -591,7 +596,7 @@
   (let [r (redis "localhost" "q1")
         b (buffer r 3)]
     (print* b)
-    ;(set-throttle! 1000)
+    (set-throttle! 1000)
     (start!)
     (println "Let's go"))
 
