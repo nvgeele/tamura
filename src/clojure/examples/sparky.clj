@@ -13,12 +13,14 @@
             [flambo.function :as fn]
             [multiset.core :as ms])
   (:use [tamura.datastructures])
-  (:import [redis.clients.jedis Jedis])
+  (:import [org.apache.spark.api.java JavaSparkContext]
+           [redis.clients.jedis Jedis]
+           [scala Tuple2])
   (:gen-class))
 
 ;;;; SET-UP & CONFIG ;;;;
 
-(declare ^:private ^org.apache.spark.api.java.JavaSparkContext sc)
+(declare ^:private ^JavaSparkContext sc)
 
 (declare ^:dynamic ^:private *coordinator*)
 
@@ -157,6 +159,24 @@
 (f/defsparkfn hash-to-multiset-map-fn
   [t]
   [(._1 t) (._2 t)])
+
+(gen-class
+  :name examples.FilterKeySizeFunction
+  :implements [org.apache.spark.api.java.function.Function]
+  :state state
+  :init init
+  :constructors {[Number] []}
+  :prefix "filter-key-size-function-")
+
+(defn filter-key-size-function-init
+  [size]
+  [[] size])
+
+(defn filter-key-size-function-call
+  [this val]
+  (let [size (.state this)
+        vals (._2 val)]
+    (>= (count vals) size)))
 
 ;;;; PRIMITIVES ;;;;
 
@@ -334,24 +354,6 @@
         (do (send-subscribers @subscribers false value id)
             (recur (map <!! inputs) value))))
     (Node. id ::union :multiset sub-chan)))
-
-(gen-class
-  :name examples.FilterKeySizeFunction
-  :implements [org.apache.spark.api.java.function.Function]
-  :state state
-  :init init
-  :constructors {[Number] []}
-  :prefix "filter-key-size-function-")
-
-(defn filter-key-size-function-init
-  [size]
-  [[] size])
-
-(defn filter-key-size-function-call
-  [this val]
-  (let [size (.state this)
-        vals (._2 val)]
-    (>= (count vals) size)))
 
 (defn make-filter-key-size-node
   [id [size] [input-node]]
@@ -585,15 +587,48 @@
         (recur (<! input) previous-c previous-r)))
     (Node. id ::delay (:return-type input-node) sub-chan)))
 
+(defn make-filter-node
+  [id [pred] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "filter node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/filter pred))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::filter :multiset sub-chan)))
+
+;; TODO: use serialisable function?
+(defn make-filter-by-key-node
+  [id [pred] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        filter-fn (fn/function (fn [^Tuple2 t] (pred (._2 t))))]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "filter-by-key node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (.filter filter-fn))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::filter-by-key :hash sub-chan)))
+
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
   (let [id (new-id!)]
     (make-redis-node id [(if key :hash :multiset) host queue key buffer timeout] [])))
-
-(defn union
-  [left right]
-  (let [id (new-id!)]
-    (make-union-node id [] [left right])))
 
 (defn print**
   [input-node form]
@@ -661,8 +696,18 @@
   [input]
   (make-delay-node (new-id!) [] [input]))
 
-;; TODO: filter
-;; TODO: filter-by-key
+(defn filter*
+  [input pred]
+  (make-filter-node (new-id!) [pred] [input]))
+
+(defn filter-by-key
+  [input pred]
+  (make-filter-by-key-node (new-id!) [pred] [input]))
+
+(defn union
+  [left right]
+  (let [id (new-id!)]
+    (make-union-node id [] [left right])))
 
 ;; TODO: union
 ;; TODO: difference
@@ -685,6 +730,7 @@
 (def redis-key "bxlqueue")
 
 ;; TODO: (future work) type hints
+;; TODO: (future work) wrap all functions in map and filter in a serialisable
 
 (defn -main
   [& args]
@@ -693,20 +739,12 @@
                  :master   "local[*]"})
 
   (comment)
-  (let [r1 (redis "localhost" "q1" :buffer 3)
-        d1 (delay r1)
+  (let [r1 (redis "localhost" "q1")
+        f1 (filter* r1 even?)
         r2 (redis "localhost" "q2" :key :id)
-        ma (map-by-key r2 :v)
-        rk (reduce-by-key ma (fn [l r] (+ l r)))
-        d2 (delay rk)]
-    (print* r1)
-    (print* d1)
-
-    (print* r2)
-    (print* rk)
-    (print* d2)
-
-    ;(set-throttle! 1000)
+        f2 (filter-by-key r2 (comp even? :v))]
+    (print* f1)
+    (print* f2)
 
     (start!)
     (println "Let's go"))
