@@ -13,7 +13,8 @@
             [flambo.function :as fn]
             [multiset.core :as ms])
   (:use [tamura.datastructures])
-  (:import [redis.clients.jedis Jedis]))
+  (:import [redis.clients.jedis Jedis])
+  (:gen-class))
 
 ;;;; SET-UP & CONFIG ;;;;
 
@@ -23,7 +24,7 @@
 (def sc (f/spark-context
           (if local
             (conf/master config "local[*]")
-            (conf/master config "spark://nvgeele.be:7077"))))
+            (conf/master config "spark://localhost:7077"))))
 
 (declare ^:dynamic ^:private *coordinator*)
 
@@ -129,6 +130,20 @@
   [inputs]
   (map subscribe-input inputs))
 
+(f/defsparkfn spark-identity [x] x)
+
+(f/defsparkfn multiplicities-seq-fn
+  [acc v]
+  (merge-with + acc (assoc {} v 1)))
+
+(f/defsparkfn multiplicities-com-fn
+  [l r]
+  (merge-with + l r))
+
+(f/defsparkfn hash-to-multiset-map-fn
+  [t]
+  [(._1 t) (._2 t)])
+
 ;;;; PRIMITIVES ;;;;
 
 (defrecord Coordinator [in])
@@ -201,13 +216,12 @@
 
 (defn collect-hash
   [rdd]
-  (let [c (reduce (fn [hash tuple]
-                    (let [k (._1 tuple)
-                          v (._2 tuple)]
-                      (update hash k #(if % (conj % v) (ms/multiset v)))))
-                  {}
-                  (f/collect rdd))]
-    c))
+  (reduce (fn [hash tuple]
+            (let [k (._1 tuple)
+                  v (._2 tuple)]
+              (update hash k #(if % (conj % v) (ms/multiset v)))))
+          {}
+          (f/collect rdd)))
 
 (defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
@@ -294,11 +308,30 @@
             (recur (map <!! inputs) value))))
     (Node. id ::union :multiset sub-chan)))
 
+(gen-class
+  :name examples.FilterKeySizeFunction
+  :implements [org.apache.spark.api.java.function.Function]
+  :state state
+  :init init
+  :constructors {[Number] []}
+  :prefix "filter-key-size-function-")
+
+(defn filter-key-size-function-init
+  [size]
+  [[] size])
+
+(defn filter-key-size-function-call
+  [this val]
+  (let [size (.state this)
+        vals (._2 val)]
+    (>= (count vals) size)))
+
 (defn make-filter-key-size-node
   [id [size] [input-node]]
   (let [sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        filter-fn (examples.FilterKeySizeFunction. size)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (emptyRDD)]
@@ -306,12 +339,8 @@
       (if (:changed? msg)
         (let [value (-> (:value msg)
                         (f/group-by-key)
-                        (.filter (fn/function
-                                   (fn [t]
-                                     (let [vals (._2 t)]
-                                       (>= (count vals) size)))))
-                        (f/flat-map-values (fn [vals]
-                                             vals)))]
+                        (.filter filter-fn)
+                        (f/flat-map-values spark-identity))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
@@ -351,7 +380,7 @@
       (log/debug (str "hash-to-multiset node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
-                        (f/map #(vector (._1 %) (._2 %))))]
+                        (f/map hash-to-multiset-map-fn))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
@@ -390,7 +419,7 @@
         (let [value (if (.isEmpty (:value msg))
                       (:value msg)
                       (-> (:value msg)
-                          (f/aggregate {} #(merge-with + %1 (assoc {} %2 1)) #(merge-with + %1 %2))
+                          (f/aggregate {} multiplicities-seq-fn multiplicities-com-fn)
                           ((fn [m] (f/parallelize sc (vec m))))))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
@@ -490,6 +519,9 @@
 (defn -main
   [& args]
 
+  (def spark-conf {:host ""
+                   :throttle 1000})
+
   (comment
     (let [r (redis "localhost" "q1")]
       (print* r)
@@ -505,19 +537,26 @@
       (start!)
       (println "Let's go!")))
 
-  (comment)
-  (let [r1 (redis "134.184.49.17" "bxlqueue" :key :user-id :buffer 2)
+  (comment
+    #(let [t1 (ftime/parse (:time %1))
+           t2 (ftime/parse (:time %2))]
+      (if (time/before? t1 t2)
+        (calculate-direction (:position %2) (:position %1))
+        (calculate-direction (:position %1) (:position %2)))))
+
+  (let [r1 (redis "localhost" "bxlqueue" :key :user-id :buffer 2)
         r2 (filter-key-size r1 2)
         r3 (reduce-by-key r2
-                          #(let [t1 (ftime/parse (:time %1))
-                                 t2 (ftime/parse (:time %2))]
-                            (if (time/before? t1 t2)
-                              (calculate-direction (:position %2) (:position %1))
-                              (calculate-direction (:position %1) (:position %2)))))
+                          (f/fn [l r]
+                            (let [t1 (ftime/parse (:time l))
+                                  t2 (ftime/parse (:time r))]
+                              (if (time/before? t1 t2)
+                                (calculate-direction (:position r) (:position l))
+                                (calculate-direction (:position l) (:position r))))))
         r4 (hash-to-multiset r3)
-        r5 (map* r4 second)
+        r5 (map* r4 (f/fn [t] (second t)))
         r6 (multiplicities r5)
-        r7 (reduce* r6 (fn [t1 t2]
+        r7 (reduce* r6 (f/fn [t1 t2]
                          (let [[d1 c1] t1
                                [d2 c2] t2]
                            (if (> c1 c2) t1 t2))))]
