@@ -36,11 +36,15 @@
 
 (def ^:private print-lock (Object.))
 
+(defn pprint*
+  [& args]
+  (locking print-lock
+    (apply pprint args)))
+
 (defn println*
   [& args]
-  #_(locking print-lock
-    (apply println args))
-  (apply println args))
+  (locking print-lock
+    (apply println args)))
 
 (defn emptyRDD
   []
@@ -505,6 +509,46 @@
                 (recur (<! input) previous buffer rdd))))
     (Node. id ::buffer (:return-type input-node) sub-chan)))
 
+(defn make-diff-add-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        hash? (= (:return-type input-node) :hash)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              rdd (emptyRDD)]
+      (log/debug (str "diff-add node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [inserted ((if hash? hash-inserted multiset-inserted) (:collection msg))
+              rdd (f/parallelize sc inserted)]
+          (send-subscribers @subscribers true rdd id)
+          (recur (<! input) rdd))
+        (do (send-subscribers @subscribers false rdd id)
+            (recur (<! input) rdd))))
+    (Node. id ::diff-add :multiset sub-chan)))
+
+;; NOTE: When using throttling, it is possible that some elements in the set of removed values
+;; were never processed to begin with.
+(defn make-diff-remove-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        hash? (= (:return-type input-node) :hash)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              rdd (emptyRDD)]
+      (log/debug (str "diff-remove node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [inserted ((if hash? hash-removed multiset-removed) (:collection msg))
+              rdd (f/parallelize sc inserted)]
+          (send-subscribers @subscribers true rdd id)
+          (recur (<! input) rdd))
+        (do (send-subscribers @subscribers false rdd id)
+            (recur (<! input) rdd))))
+    (Node. id ::diff-remove :multiset sub-chan)))
+
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
   (let [id (new-id!)]
@@ -515,8 +559,8 @@
   (let [id (new-id!)]
     (make-union-node id [] [left right])))
 
-(defn print*
-  [input-node]
+(defn print**
+  [input-node form]
   (let [id (new-id!)
         input (subscribe-input input-node)
         collector (if (= (:return-type input-node) :hash)
@@ -524,10 +568,16 @@
                     collect-multiset)]
     (go-loop [msg (<! input)]
       (when (:changed? msg)
-        (-> (:value msg)
-            (collector)
-            (pprint)))
+        (let [s (with-out-str
+                  (-> (:value msg)
+                      (collector)
+                      (pprint)))]
+          (println* (str form ": " s))))
       (recur (<! input)))))
+
+(defmacro print*
+  [input-form]
+  `(print** ~input-form (quote ~input-form)))
 
 (defn filter-key-size
   [input size]
@@ -559,8 +609,15 @@
   [input size]
   (make-buffer-node (new-id!) [size] [input]))
 
+(defn diff-add
+  [input]
+  (make-diff-add-node (new-id!) [] [input]))
+
+(defn diff-remove
+  [input]
+  (make-diff-remove-node (new-id!) [] [input]))
+
 ;; TODO: delay
-;; TODO: buffer
 ;; TODO: diff-add
 ;; TODO: diff-remove
 
@@ -593,9 +650,24 @@
                  :master "local[*]"})
 
   (comment)
-  (let [r (redis "localhost" "q1")
-        b (buffer r 3)]
-    (print* b)
+  (let [
+        ;r1 (redis "localhost" "q1")
+        ;b (buffer r1 3)
+        ;da1 (diff-add b)
+        ;dr1 (diff-remove b)
+
+        r2 (redis "localhost" "q1" :buffer 2)
+        da2 (diff-add r2)
+        dr2 (diff-remove r2)
+        ]
+    ;(print* b)
+    ;(print* da1)
+    ;(print* dr1)
+
+    (print* r2)
+    (print* da2)
+    (print* dr2)
+
     (set-throttle! 1000)
     (start!)
     (println "Let's go"))
