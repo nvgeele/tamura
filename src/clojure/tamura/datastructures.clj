@@ -250,18 +250,22 @@
 ;; TODO: hash-get-latest
 ;; TODO: tests for hash-filter-key-size
 ;; TODO: tests for hash-reduce-by-key
+;; NOTE: hash-copy makes a soft copy, but with empty inserted/removed lists
 (defprotocol HashBasic
   (hash-empty? [h])
   (hash-get [h key])
   (hash-insert [h key val])
   (hash-remove [h key])
   (hash-remove-element [h key val])
+  (hash-insert* [h key val])
+  (hash-remove-element* [h key val])
   (hash-insert-and-remove [this to-insert to-remove])
   (hash-filter-key-size [this size])
   (hash-inserted [this])
   (hash-removed [this])
   (to-hash [h])
-  (to-regular-hash [h]))
+  (to-regular-hash [h])
+  (hash-copy [h]))
 
 (defprotocol Hash
   (hash-update [h key f])
@@ -300,6 +304,18 @@
                    (dissoc hash key)
                    (assoc hash key new-items))
                  init [] removed)))
+  (hash-insert* [h key val]
+    (let [h (hash-insert h key val)]
+      (HashImpl. (.hash h)
+                 init
+                 (concat inserted (.inserted h))
+                 (concat removed (.removed h)))))
+  (hash-remove-element* [h key val]
+    (let [h (hash-remove-element h key val)]
+      (HashImpl. (.hash h)
+                 init
+                 (concat inserted (.inserted h))
+                 (concat removed (.removed h)))))
   (hash-insert-and-remove [this to-insert to-remove]
     (let [[hi rmi] (reduce (fn [[h removed] [k v]]
                              (let [h (hash-insert h k v)]
@@ -324,6 +340,8 @@
   (to-regular-hash [h]
     (HashImpl. (reduce-kv #(assoc %1 %2 (to-regular-multiset %3)) {} hash)
                make-multiset inserted removed))
+  (hash-copy [h]
+    (HashImpl. hash init [] []))
 
   Hash
   (hash-contains? [h key]
@@ -393,6 +411,20 @@
     (let [hash (hash-remove-element hash key val)
           pm (dissoc pm [key val])]
       (TimedHash. hash timeout pm [] (hash-removed hash))))
+  (hash-insert* [h key val]
+    (let [h (hash-insert h key val)]
+      (TimedHash. (.hash h)
+                  timeout
+                  (.pm h)
+                  (concat inserted (.inserted h))
+                  (concat removed (.removed h)))))
+  (hash-remove-element* [h key val]
+    (let [h (hash-remove-element h key val)]
+      (TimedHash. (.hash h)
+                  timeout
+                  (.pm h)
+                  (concat inserted (.inserted h))
+                  (concat removed (.removed h)))))
   (hash-insert-and-remove [this to-insert to-remove]
     (let [[hi rmi] (reduce (fn [[h removed] [k v]]
                              (let [h (hash-insert h k v)]
@@ -420,6 +452,8 @@
     ;; TODO: perform expirations?
     (let [rh (to-regular-hash hash)]
       (HashImpl. (.hash rh) make-multiset inserted removed)))
+  (hash-copy [h]
+    (TimedHash. hash timeout pm [] []))
 
   Hash
   (hash-contains? [h key]

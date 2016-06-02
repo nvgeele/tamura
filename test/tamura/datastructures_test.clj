@@ -110,7 +110,14 @@
       (do-op d/hash-remove :a) => {}
       (do-fn d/hash-removed) => [[:a 1] [:a 2]]
       (do-op d/hash-insert :a 1)
-      (do-op d/hash-remove-element :a 1) => {}))
+      (do-op d/hash-remove-element :a 1) => {}
+      (do-op d/hash-copy)
+      (do-op d/hash-insert* :a 1)
+      (do-op d/hash-insert* :a 2)
+      (do-op d/hash-insert* :b 1)
+      (do-op d/hash-remove-element* :a 2)
+      (do-fn d/hash-inserted) => [[:a 1] [:a 2] [:b 1]]
+      (do-fn d/hash-removed) => [[:a 2]]))
   (facts "about buffered hashes"
     (test-with (d/make-buffered-hash 2)
       (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)}
@@ -123,7 +130,15 @@
       (do-fn d/hash-removed) => [[:b 1]]
       (do-op d/hash-remove :a)
       (do-op d/hash-remove-element :b 2)
-      (do-op d/hash-remove-element :b 3) => {}))
+      (do-op d/hash-remove-element :b 3) => {}
+      (do-op d/hash-copy)
+      (do-op d/hash-insert* :a 1)
+      (do-op d/hash-insert* :a 2)
+      (do-op d/hash-insert* :b 1)
+      (do-op d/hash-insert* :a 3)
+      (do-op d/hash-remove-element* :a 3)
+      (do-fn d/hash-inserted) => [[:a 1] [:a 2] [:b 1] [:a 3]]
+      (do-fn d/hash-removed) => [[:a 1] [:a 3]]))
   (facts "about timed hashes"
     (test-with (d/make-timed-hash (t/seconds 2))
       (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)}
@@ -135,7 +150,17 @@
       (Thread/sleep 3000)
       (do-op d/hash-insert :a 4) => {:a (ms/multiset 4)}
       (do-fn d/hash-removed) => [[:a 2] [:a 3]]
-      (do-op d/hash-remove-element :a 4) => {}))
+      (do-op d/hash-remove-element :a 4) => {}
+      (do-op d/hash-insert :a 1)
+      (do-op d/hash-insert :a 2)
+      (do-op d/hash-remove :a) => {}
+      (do-op d/hash-copy)
+      (do-op d/hash-insert* :a 1)
+      (do-op d/hash-insert* :a 2)
+      (Thread/sleep 2100)
+      (do-op d/hash-insert* :b 1)
+      (do-fn d/hash-inserted) => [[:a 1] [:a 2] [:b 1]]
+      (do-fn d/hash-removed) => [[:a 2] [:a 1]]))
   (facts "about buffered & timed hashes"
     (test-with (d/make-timed-buffered-hash (t/seconds 2) 2)
       (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)}
@@ -149,4 +174,14 @@
       (Thread/sleep 2100)
       (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)}
       (do-fn d/hash-removed) => [[:a 4] [:a 5]]
-      (do-op d/hash-remove-element :a 1) => {})))
+      (do-op d/hash-remove-element :a 1) => {}
+      (do-op d/hash-copy)
+      (do-op d/hash-insert* :a 1)
+      (do-op d/hash-insert* :a 2)
+      (do-op d/hash-insert* :a 3)
+      (do-fn d/hash-inserted) => [[:a 1] [:a 2] [:a 3]]
+      (do-fn d/hash-removed) => [[:a 1]]
+      (Thread/sleep 2100)
+      (do-op d/hash-insert* :b 1)
+      (do-fn d/hash-inserted) => [[:a 1] [:a 2] [:a 3] [:b 1]]
+      (do-fn d/hash-removed) => [[:a 1] [:a 2] [:a 3]])))
