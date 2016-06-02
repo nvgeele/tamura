@@ -162,8 +162,8 @@
 
 (defrecord Coordinator [in])
 (defrecord Node [id node-type return-type sub-chan])
-(defrecord Source [id node-type return-type sub-chan in]) ;; isa Node
-(defrecord Sink [id node-type])                           ;; isa Node
+(defrecord Source [id node-type return-type sub-chan in])   ;; isa Node
+(defrecord Sink [id node-type])                             ;; isa Node
 
 (defn make-coordinator
   []
@@ -414,6 +414,7 @@
             (recur (<! input) value))))
     (Node. id ::hash-to-multiset :multiset sub-chan)))
 
+;; TODO: Test if all works for empty RDDs
 (defn make-map-node
   [id [f] [input-node]]
   (let [sub-chan (chan)
@@ -431,6 +432,25 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (Node. id ::map :multiset sub-chan)))
+
+;; TODO: Test if all works for empty RDDs
+(defn make-map-by-key
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "map-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map-values f))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::map-by-key :hash sub-chan)))
 
 (defn make-multiplicities-node
   [id [] [input-node]]
@@ -549,6 +569,22 @@
             (recur (<! input) rdd))))
     (Node. id ::diff-remove :multiset sub-chan)))
 
+(defn make-delay-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              previous-c (if (= (:return-type input-node) :hash) (make-hash) (make-multiset))
+              previous-r (emptyRDD)]
+      (log/debug (str "delay node " id " has received: " msg))
+      (send-subscribers* @subscribers (:changed? msg) previous-r previous-c id)
+      (if (:changed? msg)
+        (recur (<! input) (:collection msg) (:value msg))
+        (recur (<! input) previous-c previous-r)))
+    (Node. id ::delay (:return-type input-node) sub-chan)))
+
 (defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
   (let [id (new-id!)]
@@ -596,6 +632,10 @@
   [input f]
   (make-map-node (new-id!) [f] [input]))
 
+(defn map-by-key
+  [input f]
+  (make-map-by-key (new-id!) [f] [input]))
+
 (defn multiplicities
   [input]
   (make-multiplicities-node (new-id!) [] [input]))
@@ -617,13 +657,16 @@
   [input]
   (make-diff-remove-node (new-id!) [] [input]))
 
-;; TODO: delay
-;; TODO: diff-add
-;; TODO: diff-remove
+(defn delay
+  [input]
+  (make-delay-node (new-id!) [] [input]))
 
 ;; TODO: filter
 ;; TODO: filter-by-key
-;; TODO: map-by-key
+
+;; TODO: union
+;; TODO: difference
+;; TODO: intersect
 
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
@@ -647,28 +690,24 @@
   [& args]
 
   (setup-spark! {:app-name "sparky"
-                 :master "local[*]"})
+                 :master   "local[*]"})
 
   (comment)
-  (let [
-        ;r1 (redis "localhost" "q1")
-        ;b (buffer r1 3)
-        ;da1 (diff-add b)
-        ;dr1 (diff-remove b)
-
-        r2 (redis "localhost" "q1" :buffer 2)
-        da2 (diff-add r2)
-        dr2 (diff-remove r2)
-        ]
-    ;(print* b)
-    ;(print* da1)
-    ;(print* dr1)
+  (let [r1 (redis "localhost" "q1" :buffer 3)
+        d1 (delay r1)
+        r2 (redis "localhost" "q2" :key :id)
+        ma (map-by-key r2 :v)
+        rk (reduce-by-key ma (fn [l r] (+ l r)))
+        d2 (delay rk)]
+    (print* r1)
+    (print* d1)
 
     (print* r2)
-    (print* da2)
-    (print* dr2)
+    (print* rk)
+    (print* d2)
 
-    (set-throttle! 1000)
+    ;(set-throttle! 1000)
+
     (start!)
     (println "Let's go"))
 
