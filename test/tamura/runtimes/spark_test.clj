@@ -39,7 +39,7 @@
      (swap! test-fns
             conj
             (fn []
-              (print ct# "...") (flush)
+              (print (str \u001b "[32m" ct# " ... " \u001b "[0m")) (flush)
               (let [source-id# (new-id!)
                     source-node# (spark/make-source-node source-id# [~input-type :timeout ~timeout :buffer ~buffer] [])
                     init# ~node-init
@@ -54,7 +54,7 @@
                           *input-type* ~input-type
                           *return-type* (:return-type out-node#)]
                   ~@body))
-              (println " done")))))
+              (println (str \u001b "[32mdone" \u001b "[0m"))))))
 
 (defmacro test-multiset-node
   [node-init & body]
