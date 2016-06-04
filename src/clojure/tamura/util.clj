@@ -1,6 +1,11 @@
 (ns tamura.util
   (:require [clojure.core.async :as a :refer [>!! >! <!! <! go go-loop]]))
 
+(def counter (atom 0))
+(defn new-id!
+  []
+  (swap! counter inc))
+
 (def buffer-size 32)
 (defmacro chan
   ([] `(a/chan ~buffer-size))

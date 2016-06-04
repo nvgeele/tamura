@@ -12,6 +12,7 @@
             [tamura.values :as v])
   (:use [tamura.coordinator]
         [tamura.datastructures]
+        [tamura.node]
         [tamura.util])
   (:import [redis.clients.jedis Jedis]))
 
@@ -20,104 +21,6 @@
    def
    defn
    defsig])
-
-;; TODO: define some sinks
-;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
-;; TODO: let coordinator keep list of producers, so we can have something like (coordinator-start) to kick-start errting
-(defrecord Node [id node-type return-type sub-chan])
-(defrecord Source [id node-type return-type sub-chan in]) ;; isa Node
-(defrecord Sink [id node-type])                           ;; isa Node
-
-(def counter (atom 0))
-(core/defn new-id!
-  []
-  (swap! counter inc))
-
-(defmacro node-subscribe
-  [source channel]
-  `(>!! (:sub-chan ~source) {:subscribe ~channel}))
-
-(def nodes (atom {}))
-(def sources (atom []))
-(def threads (atom []))
-(def node-constructors (atom {}))
-
-;; TODO: check that inputs aren't sinks?
-(core/defn register-node!
-  [node-type return-type args inputs]
-  (let [id (new-id!)
-        node {:node-type node-type
-              :return-type return-type
-              :args args
-              :inputs inputs}]
-    (swap! nodes assoc id node)
-    (doseq [input-id inputs]
-      (swap! nodes update-in [input-id :outputs] conj id))
-    id))
-
-(core/defn register-source!
-  [node-type return-type args]
-  (let [id (new-id!)
-        node {:node-type node-type
-              :return-type return-type
-              :args args}]
-    (swap! sources conj id)
-    (swap! nodes assoc id node)
-    id))
-
-(core/defn register-sink!
-  [node-type args inputs]
-  (let [id (new-id!)
-        node {:node-type node-type
-              :args args
-              :inputs inputs
-              :sink? true}]
-    (swap! nodes assoc id node)
-    (doseq [input-id inputs]
-      (swap! nodes update-in [input-id :outputs] conj id))
-    id))
-
-(core/defn get-node
-  [id]
-  (get @nodes id))
-
-;; TODO: write appropriate test-code
-;; TODO: build graph whilst sorting?
-(core/defn sort-nodes
-  []
-  (let [visited (atom (set []))
-        sorted (atom [])]
-    (letfn [(sort-rec [node]
-              (when-not (contains? @visited node)
-                (doseq [output (:outputs (get @nodes node))]
-                  (sort-rec output))
-                (swap! visited conj node)
-                (swap! sorted #(cons node %))))]
-      (loop [roots @sources]
-        (if (empty? roots)
-          @sorted
-          (do (sort-rec (first roots))
-              (recur (rest roots))))))))
-
-;; TODO: maybe write some tests?
-;; TODO: check here that inputs aren't sinks?
-(core/defn build-nodes! []
-  (loop [sorted (sort-nodes)]
-    (if (empty? sorted)
-      true
-      (let [id (first sorted)
-            node (get @nodes id)
-            inputs (core/map #(:node (get @nodes %)) (:inputs node))
-            node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)]
-        (swap! nodes update-in [id :node] (constantly node-obj))
-        (if (nt/source? (:node-type node))
-          (>!! (:in *coordinator*) {:new-source (:in node-obj)})
-          (>!! (:in *coordinator*) :else))
-        (recur (rest sorted))))))
-
-(core/defn register-constructor!
-  [runtime node-type constructor]
-  (swap! node-constructors assoc-in [runtime node-type] constructor))
 
 (core/defn start!
   []
@@ -152,44 +55,6 @@
   (core/reset! counter 0)
   (core/reset! threads [])
   (>!! (:in *coordinator*) :reset))
-
-(defmacro thread
-  [& body]
-  `(let [f# (fn [] ~@body)]
-     (swap! threads conj {:body f#})))
-
-(defmacro threadloop
-  [bindings & body]
-  `(thread (loop ~bindings ~@body)))
-
-(core/defn subscribe-input
-  [input]
-  (let [c (chan)]
-    (node-subscribe input c)
-    c))
-
-(core/defn subscribe-inputs
-  [inputs]
-  (core/map subscribe-input inputs))
-
-;; TODO: use this in all nodes
-(defmacro send-subscribers
-  [subscribers changed? value id]
-  `(doseq [sub# ~subscribers]
-     (>! sub# {:changed? ~changed? :value ~value :from ~id})))
-
-(defmacro subscriber-loop
-  [id channel subscribers]
-  `(go-loop [in# (<! ~channel)]
-     (match in#
-       {:subscribe c#}
-       (do (log/debug (str "node " ~id " has received subscriber message"))
-           (if (started?)
-             (throw (Exception. "can not add subscribers to nodes when started"))
-             (swap! ~subscribers #(cons c# %))))
-
-       :else nil)
-     (recur (<! ~channel))))
 
 ;; NOTE: timeout must be a period (e.g. t/minutes)
 ;; TODO: leasing when no data has changed?
@@ -236,7 +101,7 @@
 
         ;; TODO: error?
         :else (recur (<! in) subs value)))
-    (Source. id nt/source return-type in in)))
+    (make-source id nt/source return-type in in)))
 (register-constructor! :clj nt/source make-source-node)
 
 (core/defn make-redis-node
@@ -279,7 +144,7 @@
       (recur (core/map <!! inputs)
              #_(<! (first inputs))
              #_(for [input inputs] (<! input))))
-    (Sink. id nt/do-apply)))
+    (make-sink id nt/do-apply)))
 (register-constructor! :clj nt/do-apply make-do-apply-node)
 
 ;; TODO: put in docstring that it emits empty hash or set
@@ -296,7 +161,7 @@
       (log/debug (str "delay-node " id " has received: " msg))
       (send-subscribers @subscribers (:changed? msg) previous id)
       (recur (<! input) (if (:changed? msg) (:value msg) previous)))
-    (Node. id nt/delay (:return-type input-node) sub-chan)))
+    (make-node id nt/delay (:return-type input-node) sub-chan)))
 (register-constructor! :clj nt/delay make-delay-node)
 
 (core/defn make-multiplicities-node
@@ -314,7 +179,7 @@
           (recur (<! input) multiplicities))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/multiplicities :multiset sub-chan)))
+    (make-node id nt/multiplicities :multiset sub-chan)))
 (register-constructor! :clj nt/multiplicities make-multiplicities-node)
 
 (core/defn make-reduce-node
@@ -334,7 +199,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/reduce :multiset sub-chan)))
+    (make-node id nt/reduce :multiset sub-chan)))
 (register-constructor! :clj nt/reduce make-reduce-node)
 
 (core/defn make-reduce-by-key-node
@@ -354,7 +219,7 @@
           (recur (<! input) reduced))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/reduce-by-key :hash sub-chan)))
+    (make-node id nt/reduce-by-key :hash sub-chan)))
 (register-constructor! :clj nt/reduce-by-key make-reduce-by-key-node)
 
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
@@ -381,7 +246,7 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value (:value msg) :from id}))
             (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
-    (Node. id nt/throttle (:return-type input-node) sub-chan)))
+    (make-node id nt/throttle (:return-type input-node) sub-chan)))
 (register-constructor! :clj nt/throttle make-throttle-node)
 
 (core/defn make-buffer-node
@@ -412,7 +277,7 @@
             :else
             (do (send-subscribers @subscribers false buffer id)
                 (recur (<! input) previous buffer))))
-    (Node. id nt/buffer (:return-type input-node) sub-chan)))
+    (make-node id nt/buffer (:return-type input-node) sub-chan)))
 (register-constructor! :clj nt/buffer make-buffer-node)
 
 (core/defn make-diff-add-node
@@ -432,7 +297,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/diff-add :multiset sub-chan)))
+    (make-node id nt/diff-add :multiset sub-chan)))
 (register-constructor! :clj nt/diff-add make-diff-add-node)
 
 (core/defn make-diff-remove-node
@@ -452,7 +317,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/diff-remove :multiset sub-chan)))
+    (make-node id nt/diff-remove :multiset sub-chan)))
 (register-constructor! :clj nt/diff-remove make-diff-remove-node)
 
 (core/defn make-filter-key-size-node
@@ -470,7 +335,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/filter-key-size :hash sub-chan)))
+    (make-node id nt/filter-key-size :hash sub-chan)))
 (register-constructor! :clj nt/filter-key-size make-filter-key-size-node)
 
 (core/defn make-hash-to-multiset-node
@@ -488,7 +353,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/hash-to-multiset :multiset sub-chan)))
+    (make-node id nt/hash-to-multiset :multiset sub-chan)))
 (register-constructor! :clj nt/hash-to-multiset make-hash-to-multiset-node)
 
 (core/defn make-map-node
@@ -506,7 +371,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/map :multiset sub-chan)))
+    (make-node id nt/map :multiset sub-chan)))
 (register-constructor! :clj nt/map make-map-node)
 
 (core/defn make-map-by-key-node
@@ -524,7 +389,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/map-by-key :hash sub-chan)))
+    (make-node id nt/map-by-key :hash sub-chan)))
 (register-constructor! :clj nt/map-by-key make-map-by-key-node)
 
 (core/defn make-filter-node
@@ -542,7 +407,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/filter :multiset sub-chan)))
+    (make-node id nt/filter :multiset sub-chan)))
 (register-constructor! :clj nt/filter make-filter-node)
 
 (core/defn make-filter-by-key-node
@@ -560,7 +425,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id nt/filter-by-key :hash sub-chan)))
+    (make-node id nt/filter-by-key :hash sub-chan)))
 (register-constructor! :clj nt/filter-by-key make-filter-by-key-node)
 
 (core/defn- make-signal
