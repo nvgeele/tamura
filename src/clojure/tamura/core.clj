@@ -3,9 +3,10 @@
             [clojure.core.async :as a :refer [>!! >! <!! <! go go-loop]]
             [clojure.core.match :refer [match]]
             [potemkin :as p]
+            [tamura.config :as cfg]
             [tamura.macros :as macros]
             [tamura.node-types :as nt]
-    ;; We have to refer to runtimes as to make sure the constructors are registered and loaded
+            ;; We have to refer to runtimes as to make sure the constructors are registered and loaded
             [tamura.runtimes.clj :as crt])
   (:use [tamura.coordinator]
         [tamura.datastructures]
@@ -29,6 +30,11 @@
   (when (started?)
     (throw (Exception. "already started")))
   (build-nodes!)
+  (if-let [t (cfg/throttle?)]
+    (threadloop []
+      (Thread/sleep t)
+      (>!! (:in *coordinator*) :heartbeat)
+      (recur)))
   (swap! threads #(doall (for [t %]
                            (let [thread (Thread. (:body t))]
                              (.start thread)

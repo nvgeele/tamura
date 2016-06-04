@@ -5,6 +5,7 @@
             [clojure.tools.logging :as log]
             [clojure.pprint :refer [pprint]]
             [multiset.core :as ms]
+            [tamura.config :as cfg]
             [tamura.node-types :as nt])
   (:use [tamura.coordinator]
         [tamura.datastructures]
@@ -16,8 +17,10 @@
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
 
+;; TODO: capture the value of cfg/throttle? at construction?
 ;; TODO: use buffered and timed datastructures
 ;; TODO: send internal hash and multiset from above data structures
+;; TODO: memoize transformer
 (defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
   (let [in (chan)
@@ -37,26 +40,41 @@
                             (make-timed-multiset timeout)
                             (make-timed-hash timeout))
                           :else
-                          (if (= return-type :multiset) (make-multiset) (make-hash)))]
-             (log/debug (str "source " id " has received: " (seq msg)))
-             (match msg
-               {:subscribe subscriber}
-               (recur (<! in) (cons subscriber subs) value)
+                          (if (= return-type :multiset) (make-multiset) (make-hash)))
+              changes? false]
+      (log/debug (str "source " id " has received: " (seq msg)))
+      (match msg
+        {:subscribe subscriber}
+        (recur (<! in) (cons subscriber subs) value changes?)
 
-               {:destination id :value new-value}
-               (let [new-coll (if (= return-type :multiset)
-                                (multiset-insert value new-value)
-                                (hash-insert value (first new-value) (second new-value)))]
-                 (send-subscribers subs true (transformer new-coll) id)
-                 (recur (<! in) subs new-coll))
+        {:destination id :value new-value}
+        (if (cfg/throttle?)
+          (let [new-coll (if (= return-type :multiset)
+                           (multiset-insert* value new-value)
+                           (hash-insert* value (first new-value) (second new-value)))]
+            (recur (<! in) subs new-coll true))
+          (let [new-coll (if (= return-type :multiset)
+                           (multiset-insert value new-value)
+                           (hash-insert value (first new-value) (second new-value)))]
+            (send-subscribers subs true (transformer new-coll) id)
+            (recur (<! in) subs new-coll false)))
 
-               ;; TODO: memoize transformer
-               {:destination _}
-               (do (send-subscribers subs false (transformer value) id)
-                   (recur (<! in) subs value))
+        {:destination _}
+        (do (when-not (cfg/throttle?)
+              (send-subscribers subs false (transformer value) id))
+            (recur (<! in) subs value changes?))
 
-               ;; TODO: error?
-               :else (recur (<! in) subs value)))
+        :heartbeat
+        (if (cfg/throttle?)
+          (let [new-value (if (= return-type :multiset)
+                            (multiset-copy value)
+                            (hash-copy value))]
+            (send-subscribers subs changes? (transformer value) id)
+            (recur (<! in) subs new-value false))
+          (recur (<! in) subs value changes?))
+
+        ;; TODO: error?
+        :else (recur (<! in) subs value changes?)))
     (make-source id nt/source return-type in in)))
 (register-constructor! :clj nt/source make-source-node)
 
