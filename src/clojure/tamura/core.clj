@@ -8,6 +8,7 @@
             [multiset.core :as ms]
             [potemkin :as p]
             [tamura.macros :as macros]
+            [tamura.node-types :as nt]
             [tamura.values :as v])
   (:use [tamura.datastructures])
   (:import [redis.clients.jedis Jedis]))
@@ -163,8 +164,7 @@
             inputs (core/map #(:node (get @nodes %)) (:inputs node))
             node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)]
         (swap! nodes update-in [id :node] (constantly node-obj))
-        (if (or (= (:node-type node) ::source)
-                (contains? (ancestors (:node-type node)) ::source))
+        (if (nt/source? (:node-type node))
           (>!! (:in *coordinator*) {:new-source (:in node-obj)})
           (>!! (:in *coordinator*) :else))
         (recur (rest sorted))))))
@@ -331,8 +331,8 @@
 
         ;; TODO: error?
         :else (recur (<! in) subs value)))
-    (Source. id ::source return-type in in)))
-(register-constructor! :clj ::source make-source-node)
+    (Source. id nt/source return-type in in)))
+(register-constructor! :clj nt/source make-source-node)
 
 (core/defn make-redis-node
   [id [return-type host queue key buffer timeout] []]
@@ -347,8 +347,7 @@
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur)))
     source-node))
-(register-constructor! :clj :redis make-redis-node)
-(derive ::redis ::source)
+(register-constructor! :clj nt/redis make-redis-node)
 
 ;; input nodes = the actual node records
 ;; inputs = input channels
@@ -375,8 +374,8 @@
       (recur (core/map <!! inputs)
              #_(<! (first inputs))
              #_(for [input inputs] (<! input))))
-    (Sink. id ::do-apply)))
-(register-constructor! :clj ::do-apply make-do-apply-node)
+    (Sink. id nt/do-apply)))
+(register-constructor! :clj nt/do-apply make-do-apply-node)
 
 ;; TODO: put in docstring that it emits empty hash or set
 ;; TODO: make sure it still works with leasing
@@ -392,8 +391,8 @@
       (log/debug (str "delay-node " id " has received: " msg))
       (send-subscribers @subscribers (:changed? msg) previous id)
       (recur (<! input) (if (:changed? msg) (:value msg) previous)))
-    (Node. id ::delay (:return-type input-node) sub-chan)))
-(register-constructor! :clj ::delay make-delay-node)
+    (Node. id nt/delay (:return-type input-node) sub-chan)))
+(register-constructor! :clj nt/delay make-delay-node)
 
 (core/defn make-multiplicities-node
   [id [] [input-node]]
@@ -410,8 +409,8 @@
           (recur (<! input) multiplicities))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::multiplicities :multiset sub-chan)))
-(register-constructor! :clj ::multiplicities make-multiplicities-node)
+    (Node. id nt/multiplicities :multiset sub-chan)))
+(register-constructor! :clj nt/multiplicities make-multiplicities-node)
 
 (core/defn make-reduce-node
   [id [f initial] [input-node]]
@@ -430,8 +429,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::reduce :multiset sub-chan)))
-(register-constructor! :clj ::reduce make-reduce-node)
+    (Node. id nt/reduce :multiset sub-chan)))
+(register-constructor! :clj nt/reduce make-reduce-node)
 
 (core/defn make-reduce-by-key-node
   [id [f initial] [input-node]]
@@ -450,8 +449,8 @@
           (recur (<! input) reduced))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::reduce-by-key :hash sub-chan)))
-(register-constructor! :clj ::reduce-by-key make-reduce-by-key-node)
+    (Node. id nt/reduce-by-key :hash sub-chan)))
+(register-constructor! :clj nt/reduce-by-key make-reduce-by-key-node)
 
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
 ;; The reason for this is that if we would not do this, the buffer for the trigger channel would fill up,
@@ -477,8 +476,8 @@
         (do (doseq [sub @subscribers]
               (>! sub {:changed? false :value (:value msg) :from id}))
             (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
-    (Node. id ::throttle (:return-type input-node) sub-chan)))
-(register-constructor! :clj ::throttle make-throttle-node)
+    (Node. id nt/throttle (:return-type input-node) sub-chan)))
+(register-constructor! :clj nt/throttle make-throttle-node)
 
 (core/defn make-buffer-node
   [id [size] [input-node]]
@@ -508,8 +507,8 @@
             :else
             (do (send-subscribers @subscribers false buffer id)
                 (recur (<! input) previous buffer))))
-    (Node. id ::buffer (:return-type input-node) sub-chan)))
-(register-constructor! :clj ::buffer make-buffer-node)
+    (Node. id nt/buffer (:return-type input-node) sub-chan)))
+(register-constructor! :clj nt/buffer make-buffer-node)
 
 (core/defn make-diff-add-node
   [id [] [input-node]]
@@ -528,8 +527,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::diff-add :multiset sub-chan)))
-(register-constructor! :clj ::diff-add make-diff-add-node)
+    (Node. id nt/diff-add :multiset sub-chan)))
+(register-constructor! :clj nt/diff-add make-diff-add-node)
 
 (core/defn make-diff-remove-node
   [id [] [input-node]]
@@ -548,8 +547,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::diff-remove :multiset sub-chan)))
-(register-constructor! :clj ::diff-remove make-diff-remove-node)
+    (Node. id nt/diff-remove :multiset sub-chan)))
+(register-constructor! :clj nt/diff-remove make-diff-remove-node)
 
 (core/defn make-filter-key-size-node
   [id [size] [input-node]]
@@ -566,8 +565,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::filter-key-size :hash sub-chan)))
-(register-constructor! :clj ::filter-key-size make-filter-key-size-node)
+    (Node. id nt/filter-key-size :hash sub-chan)))
+(register-constructor! :clj nt/filter-key-size make-filter-key-size-node)
 
 (core/defn make-hash-to-multiset-node
   [id [] [input-node]]
@@ -584,8 +583,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::hash-to-multiset :multiset sub-chan)))
-(register-constructor! :clj ::hash-to-multiset make-hash-to-multiset-node)
+    (Node. id nt/hash-to-multiset :multiset sub-chan)))
+(register-constructor! :clj nt/hash-to-multiset make-hash-to-multiset-node)
 
 (core/defn make-map-node
   [id [f] [input-node]]
@@ -602,8 +601,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::map :multiset sub-chan)))
-(register-constructor! :clj ::map make-map-node)
+    (Node. id nt/map :multiset sub-chan)))
+(register-constructor! :clj nt/map make-map-node)
 
 (core/defn make-map-by-key-node
   [id [f] [input-node]]
@@ -620,8 +619,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::map-by-key :hash sub-chan)))
-(register-constructor! :clj ::map-by-key make-map-by-key-node)
+    (Node. id nt/map-by-key :hash sub-chan)))
+(register-constructor! :clj nt/map-by-key make-map-by-key-node)
 
 (core/defn make-filter-node
   [id [f] [input-node]]
@@ -638,8 +637,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::filter :multiset sub-chan)))
-(register-constructor! :clj ::filter make-filter-node)
+    (Node. id nt/filter :multiset sub-chan)))
+(register-constructor! :clj nt/filter make-filter-node)
 
 (core/defn make-filter-by-key-node
   [id [f] [input-node]]
@@ -656,8 +655,8 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::filter-by-key :hash sub-chan)))
-(register-constructor! :clj ::filter-by-key make-filter-by-key-node)
+    (Node. id nt/filter-by-key :hash sub-chan)))
+(register-constructor! :clj nt/filter-by-key make-filter-by-key-node)
 
 (def ^:dynamic ^:private *coordinator* (make-coordinator))
 
@@ -673,7 +672,7 @@
 (core/defn redis
   [host queue & {:keys [key buffer timeout] :or {key false buffer false timeout false}}]
   (let [return-type (if key :hash :multiset)]
-    (make-signal (register-source! ::redis return-type [return-type host queue key buffer timeout]))))
+    (make-signal (register-source! nt/redis return-type [return-type host queue key buffer timeout]))))
 
 ;; TODO: make this a sink
 (core/defn do-apply
@@ -681,7 +680,7 @@
   (assert*
     (andmap v/signal? (cons arg args)) "only signals from the second argument on")
   (let [inputs (core/map v/value (cons arg args))
-        node (register-node! ::do-apply nil [f] inputs)]
+        node (register-node! nt/do-apply nil [f] inputs)]
     (make-signal node)))
 
 ;; TODO: constant set
@@ -694,7 +693,7 @@
     (v/signal? arg) "argument to delay should be a signal")
   (let [input (v/value arg)
         return-type (:return-type (get-node input))
-        node (register-node! ::delay return-type [] [input])]
+        node (register-node! nt/delay return-type [] [input])]
     (make-signal node)))
 
 (core/defn multiplicities
@@ -702,32 +701,34 @@
   (assert*
     (v/signal? arg) "argument to multiplicities should be a signal"
     (= (:return-type (get-node (v/value arg))) :multiset) "input for multiplicities must be multiset")
-  (make-signal (register-node! ::multiplicities :multiset [] [(v/value arg)])))
+  (make-signal (register-node! nt/multiplicities :multiset [] [(v/value arg)])))
 
 ;; NOTE: Because multisets have no order, the function must be both commutative and associative
+;; TODO: reduce code duplication
 (core/defn reduce
   ([source f]
    (assert*
      (v/signal? source) "argument to reduce should be a signal"
      (= (:return-type (get-node (v/value source))) :multiset) "input for reduce must be a multiset")
-   (make-signal (register-node! ::reduce :multiset [f false] [(v/value source)])))
+   (make-signal (register-node! nt/reduce :multiset [f false] [(v/value source)])))
   ([source f val]
    (assert*
      (v/signal? source) "argument to reduce should be a signal"
      (= (:return-type (get-node (v/value source))) :multiset) "input for reduce must be a multiset")
-   (make-signal (register-node! ::reduce :multiset [f {:val val}] [(v/value source)]))))
+   (make-signal (register-node! nt/reduce :multiset [f {:val val}] [(v/value source)]))))
 
 ;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
 ;; nodes depend on a throttle signal and one or more other signals.
 ;; TODO: something something initialisation?
 ;; TODO: what if the input hasn't changed next time we trigger? Do we still propagate a "change"?
+;; TODO: create trigger node when constructing?
 (core/defn throttle
   [signal ms]
   (assert*
     (v/signal? signal) "first argument of throttle must be signal")
-  (let [trigger (register-source! ::source :multiset [:multiset])
+  (let [trigger (register-source! nt/source :multiset [:multiset])
         return-type (:return-type (get-node (v/value signal)))
-        node (register-node! ::throttle return-type [ms] [(v/value signal) trigger])]
+        node (register-node! nt/throttle return-type [ms] [(v/value signal) trigger])]
     (threadloop []
       (Thread/sleep ms)
       (>!! (:in *coordinator*) {:destination trigger :value nil})
@@ -740,28 +741,30 @@
   [sig size]
   (assert*
     (v/signal? sig) "first argument to buffer should be a signal"
-    (or (= (:node-type (get-node (v/value sig))) ::source)
-        (contains? (ancestors (:node-type (get-node (v/value sig)))) ::source))
-    "input for buffer node should be a source")
-  (make-signal (register-node! ::buffer (:return-type (get-node (v/value sig))) [size] [(v/value sig)])))
+    (nt/source? (:node-type (get-node (v/value sig)))) "input for buffer node should be a source")
+  (make-signal (register-node! nt/buffer (:return-type (get-node (v/value sig))) [size] [(v/value sig)])))
 
 (core/defn diff-add
   [sig]
-  (assert*
-    (v/signal? sig) "first argument to diff-add should be a signal"
-    (or (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
-        (contains? (ancestors (:node-type (get-node (v/value sig)))) ::source))
-    "input for diff-add node should be a source, buffer, or delay")
-  (make-signal (register-node! ::diff-add (:return-type (get-node (v/value sig))) [] [(v/value sig)])))
+  (let [input-node-type (:node-type (get-node (v/value sig)))]
+    (assert*
+      (v/signal? sig) "first argument to diff-add should be a signal"
+      (or (nt/source? input-node-type)
+          (nt/buffer? input-node-type)
+          (nt/delay? input-node-type))
+      "input for diff-add node should be a source, buffer, or delay")
+    (make-signal (register-node! nt/diff-add (:return-type (get-node (v/value sig))) [] [(v/value sig)]))))
 
 (core/defn diff-remove
   [sig]
-  (assert*
-    (v/signal? sig) "first argument to diff-remove should be a signal"
-    (or (contains? [::buffer ::source ::delay] (:node-type (get-node (v/value sig))))
-        (contains? (ancestors (:node-type (get-node (v/value sig)))) ::source))
-    "input for diff-remove node should be a source, buffer, or delay")
-  (make-signal (register-node! ::diff-remove (:return-type (get-node (v/value sig))) [] [(v/value sig)])))
+  (let [input-node-type (:node-type (get-node (v/value sig)))]
+    (assert*
+      (v/signal? sig) "first argument to diff-remove should be a signal"
+      (or (nt/source? input-node-type)
+          (nt/buffer? input-node-type)
+          (nt/delay? input-node-type))
+      "input for diff-remove node should be a source, buffer, or delay")
+    (make-signal (register-node! nt/diff-remove (:return-type (get-node (v/value sig))) [] [(v/value sig)]))))
 
 ;; TODO: make sure size > buffer size of buffer or source?
 (core/defn filter-key-size
@@ -769,27 +772,28 @@
   (assert*
     (v/signal? source) "argument to filter-key-size should be a signal"
     (= (:return-type (get-node (v/value source))) :hash) "input for filter-key-size must be a hash")
-  (make-signal (register-node! ::filter-key-size :hash [size] [(v/value source)])))
+  (make-signal (register-node! nt/filter-key-size :hash [size] [(v/value source)])))
 
 ;; NOTE: Because multisets have no order, the function must be both commutative and associative
+;; TODO: reduce code duplication
 (core/defn reduce-by-key
   ([source f]
    (assert*
      (v/signal? source) "argument to reduce-by-key should be a signal"
      (= (:return-type (get-node (v/value source))) :hash) "input for reduce-by-key must be a hash")
-   (make-signal (register-node! ::reduce-by-key :hash [f false] [(v/value source)])))
+   (make-signal (register-node! nt/reduce-by-key :hash [f false] [(v/value source)])))
   ([source f val]
    (assert*
      (v/signal? source) "argument to reduce-by-key should be a signal"
      (= (:return-type (get-node (v/value source))) :hash) "input for reduce-by-key must be a hash")
-   (make-signal (register-node! ::reduce-by-key :hash [f {:val val}] [(v/value source)]))))
+   (make-signal (register-node! nt/reduce-by-key :hash [f {:val val}] [(v/value source)]))))
 
 (core/defn hash-to-multiset
   [source]
   (assert*
     (v/signal? source) "argument to hash-to-multiset should be a signal"
     (= (:return-type (get-node (v/value source))) :hash) "input for hash-to-multiset must be a hash")
-  (make-signal (register-node! ::hash-to-multiset :multiset [] [(v/value source)])))
+  (make-signal (register-node! nt/hash-to-multiset :multiset [] [(v/value source)])))
 
 ;; TODO: like reduce, make it work for regular collections too
 (core/defn map
@@ -797,14 +801,14 @@
   (assert*
     (v/signal? source) "argument to map should be a signal"
     (= (:return-type (get-node (v/value source))) :multiset) "input for map must be a multiset")
-  (make-signal (register-node! ::map :multiset [f] [(v/value source)])))
+  (make-signal (register-node! nt/map :multiset [f] [(v/value source)])))
 
 (core/defn map-by-key
   [source f]
   (assert*
     (v/signal? source) "argument to map-by-key should be a signal"
     (= (:return-type (get-node (v/value source))) :multiset) "input for map-by-key must be a hash")
-  (make-signal (register-node! ::map-by-key :hash [f] [(v/value source)])))
+  (make-signal (register-node! nt/map-by-key :hash [f] [(v/value source)])))
 
 ;; TODO: like reduce, make it work for regular collections too
 (core/defn filter
@@ -812,20 +816,20 @@
   (assert*
     (v/signal? source) "argument to filter should be a signal"
     (= (:return-type (get-node (v/value source))) :multiset) "input for filter must be a multiset")
-  (make-signal (register-node! ::filter :multiset [f] [(v/value source)])))
+  (make-signal (register-node! nt/filter :multiset [f] [(v/value source)])))
 
 (core/defn filter-by-key
   [source f]
   (assert*
     (v/signal? source) "argument to filter-by-key should be a signal"
     (= (:return-type (get-node (v/value source))) :hash) "input for filter-by-key must be a hash")
-  (make-signal (register-node! ::filter-by-key :hash [f] [(v/value source)])))
+  (make-signal (register-node! nt/filter-by-key :hash [f] [(v/value source)])))
 
 ;; TODO: lock on owned object
 (core/defn make-print-signal-node
   [id [signal-text] [input]]
   (make-do-apply-node id [#(locking *out* (println signal-text ":" %))] [input]))
-(register-constructor! :clj ::print-signal make-print-signal-node)
+(register-constructor! :clj nt/print make-print-signal-node)
 
 (defmacro print-signal
   [signal]
@@ -835,14 +839,14 @@
        (let [sig# ~signal]
          (assert*
            (v/signal? sig#) "argument to print-signal should be a signal")
-         (~k (register-sink! ::print-signal [(quote ~signal)] [(v/value sig#)]))))))
+         (~k (register-sink! nt/print [(quote ~signal)] [(v/value sig#)]))))))
 
 (comment
   (core/defn print-signal
     [signal]
     (assert*
       (v/signal? signal) "argument to print-signal should be a signal")
-    (make-signal (register-sink! ::print-signal [signal-text] [(v/value signal)])))
+    (make-signal (register-sink! nt/print [signal-text] [(v/value signal)])))
 
   (defmacro print-signal
     [signal]
