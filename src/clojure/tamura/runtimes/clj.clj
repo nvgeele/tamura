@@ -212,14 +212,14 @@
     (go-loop [msg (<! input)
               trig (<! trigger)
               seen-value false]
-             (log/debug (str "throttle-node " id " has received: " msg))
-             (if (:changed? trig)
-               (do (doseq [sub @subscribers]
-                     (>! sub {:changed? (or seen-value (:changed? msg)) :value (:value msg) :from id}))
-                   (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))
-               (do (doseq [sub @subscribers]
-                     (>! sub {:changed? false :value (:value msg) :from id}))
-                   (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
+      (log/debug (str "throttle-node " id " has received: " msg))
+      (if (:changed? trig)
+        (do (doseq [sub @subscribers]
+              (>! sub {:changed? (or seen-value (:changed? msg)) :value (:value msg) :from id}))
+            (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))
+        (do (doseq [sub @subscribers]
+              (>! sub {:changed? false :value (:value msg) :from id}))
+            (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
     (make-node id nt/throttle (:return-type input-node) sub-chan)))
 (register-constructor! :clj nt/throttle make-throttle-node)
 
