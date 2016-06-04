@@ -51,6 +51,7 @@
                ~@(rest (rest bindings))]
            ~@body)))))
 
+;; TODO: as macro? Because performance, it's the name of the game
 (core/defn ormap
   [f lst]
   (loop [l lst]
@@ -300,9 +301,7 @@
 (core/defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
   (let [in (chan)
-        transformer (if (= return-type :multiset)
-                      #(to-regular-multiset %)
-                      #(to-regular-hash %))]
+        transformer (if (= return-type :multiset) to-regular-multiset to-regular-hash)]
     (go-loop [msg (<! in)
               subs []
               value (cond (and buffer timeout)
@@ -392,11 +391,10 @@
   [id [] [input-node]]
   (let [sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)
-        hash-input? (= (:return-type input-node) :hash)]
+        input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              previous (if hash-input? (make-hash) (make-multiset))]
+              previous (if (= (:return-type input-node) :hash) (make-hash) (make-multiset))]
       (log/debug (str "delay-node " id " has received: " msg))
       (send-subscribers @subscribers (:changed? msg) previous id)
       (recur (<! input) (if (:changed? msg) (:value msg) previous)))
@@ -536,7 +534,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::diff-add (:return-type input-node) sub-chan)))
+    (Node. id ::diff-add :multiset sub-chan)))
 (register-constructor! ::diff-add make-diff-add-node)
 
 (core/defn make-diff-remove-node
@@ -556,7 +554,7 @@
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (Node. id ::diff-remove (:return-type input-node) sub-chan)))
+    (Node. id ::diff-remove :multiset sub-chan)))
 (register-constructor! ::diff-remove make-diff-remove-node)
 
 (core/defn make-filter-key-size-node
@@ -829,6 +827,7 @@
     (= (:return-type (get-node (v/value source))) :hash) "input for filter-by-key must be a hash")
   (make-signal (register-node! ::filter-by-key :hash [f] [(v/value source)])))
 
+;; TODO: lock on owned object
 (core/defn make-print-signal-node
   [id [signal-text] [input]]
   (make-do-apply-node id [#(locking *out* (println signal-text ":" %))] [input]))
