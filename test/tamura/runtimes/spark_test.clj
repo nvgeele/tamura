@@ -48,6 +48,8 @@
                                 (init# source-node#)
                                 source-node#)]
                 (n/node-subscribe out-node# test-chan#)
+                ;; 100 ms sleep to make sure nodes are subscribed and so on
+                (Thread/sleep 100)
                 (binding [*source-id* source-id#
                           *source-chan* (:in source-node#)
                           *test-chan* test-chan#
