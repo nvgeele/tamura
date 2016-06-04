@@ -17,6 +17,8 @@
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
 
+(def ^{:private true} this-runtime :clj)
+
 ;; TODO: capture the value of cfg/throttle? at construction?
 ;; TODO: use buffered and timed datastructures
 ;; TODO: send internal hash and multiset from above data structures
@@ -76,7 +78,7 @@
         ;; TODO: error?
         :else (recur (<! in) subs value changes?)))
     (make-source id nt/source return-type in in)))
-(register-constructor! :clj nt/source make-source-node)
+(register-constructor! this-runtime nt/source make-source-node)
 
 (defn make-redis-node
   [id [return-type host queue key buffer timeout] []]
@@ -91,7 +93,7 @@
         (>!! (:in *coordinator*) {:destination id :value value})
         (recur)))
     source-node))
-(register-constructor! :clj nt/redis make-redis-node)
+(register-constructor! this-runtime nt/redis make-redis-node)
 
 ;; input nodes = the actual node records
 ;; inputs = input channels
@@ -119,7 +121,7 @@
              #_(<! (first inputs))
              #_(for [input inputs] (<! input))))
     (make-sink id nt/do-apply)))
-(register-constructor! :clj nt/do-apply make-do-apply-node)
+(register-constructor! this-runtime nt/do-apply make-do-apply-node)
 
 ;; TODO: put in docstring that it emits empty hash or set
 ;; TODO: make sure it still works with leasing
@@ -136,7 +138,7 @@
       (send-subscribers @subscribers (:changed? msg) previous id)
       (recur (<! input) (if (:changed? msg) (:value msg) previous)))
     (make-node id nt/delay (:return-type input-node) sub-chan)))
-(register-constructor! :clj nt/delay make-delay-node)
+(register-constructor! this-runtime nt/delay make-delay-node)
 
 (defn make-multiplicities-node
   [id [] [input-node]]
@@ -154,7 +156,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/multiplicities :multiset sub-chan)))
-(register-constructor! :clj nt/multiplicities make-multiplicities-node)
+(register-constructor! this-runtime nt/multiplicities make-multiplicities-node)
 
 (defn make-reduce-node
   [id [f initial] [input-node]]
@@ -174,7 +176,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/reduce :multiset sub-chan)))
-(register-constructor! :clj nt/reduce make-reduce-node)
+(register-constructor! this-runtime nt/reduce make-reduce-node)
 
 (defn make-reduce-by-key-node
   [id [f initial] [input-node]]
@@ -194,7 +196,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/reduce-by-key :hash sub-chan)))
-(register-constructor! :clj nt/reduce-by-key make-reduce-by-key-node)
+(register-constructor! this-runtime nt/reduce-by-key make-reduce-by-key-node)
 
 ;; NOTE: Because of the throttle nodes, sources now also propagate even when they haven't received an initial value.
 ;; The reason for this is that if we would not do this, the buffer for the trigger channel would fill up,
@@ -221,7 +223,7 @@
               (>! sub {:changed? false :value (:value msg) :from id}))
             (recur (<! input) (<! trigger) (or seen-value (:changed? msg))))))
     (make-node id nt/throttle (:return-type input-node) sub-chan)))
-(register-constructor! :clj nt/throttle make-throttle-node)
+(register-constructor! this-runtime nt/throttle make-throttle-node)
 
 (defn make-buffer-node
   [id [size] [input-node]]
@@ -252,7 +254,7 @@
             (do (send-subscribers @subscribers false buffer id)
                 (recur (<! input) previous buffer))))
     (make-node id nt/buffer (:return-type input-node) sub-chan)))
-(register-constructor! :clj nt/buffer make-buffer-node)
+(register-constructor! this-runtime nt/buffer make-buffer-node)
 
 (defn make-diff-add-node
   [id [] [input-node]]
@@ -272,7 +274,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/diff-add :multiset sub-chan)))
-(register-constructor! :clj nt/diff-add make-diff-add-node)
+(register-constructor! this-runtime nt/diff-add make-diff-add-node)
 
 (defn make-diff-remove-node
   [id [] [input-node]]
@@ -292,7 +294,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/diff-remove :multiset sub-chan)))
-(register-constructor! :clj nt/diff-remove make-diff-remove-node)
+(register-constructor! this-runtime nt/diff-remove make-diff-remove-node)
 
 (defn make-filter-key-size-node
   [id [size] [input-node]]
@@ -310,7 +312,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/filter-key-size :hash sub-chan)))
-(register-constructor! :clj nt/filter-key-size make-filter-key-size-node)
+(register-constructor! this-runtime nt/filter-key-size make-filter-key-size-node)
 
 (defn make-hash-to-multiset-node
   [id [] [input-node]]
@@ -328,7 +330,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/hash-to-multiset :multiset sub-chan)))
-(register-constructor! :clj nt/hash-to-multiset make-hash-to-multiset-node)
+(register-constructor! this-runtime nt/hash-to-multiset make-hash-to-multiset-node)
 
 (defn make-map-node
   [id [f] [input-node]]
@@ -346,7 +348,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/map :multiset sub-chan)))
-(register-constructor! :clj nt/map make-map-node)
+(register-constructor! this-runtime nt/map make-map-node)
 
 (defn make-map-by-key-node
   [id [f] [input-node]]
@@ -364,7 +366,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/map-by-key :hash sub-chan)))
-(register-constructor! :clj nt/map-by-key make-map-by-key-node)
+(register-constructor! this-runtime nt/map-by-key make-map-by-key-node)
 
 (defn make-filter-node
   [id [f] [input-node]]
@@ -382,7 +384,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/filter :multiset sub-chan)))
-(register-constructor! :clj nt/filter make-filter-node)
+(register-constructor! this-runtime nt/filter make-filter-node)
 
 (defn make-filter-by-key-node
   [id [f] [input-node]]
@@ -400,7 +402,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/filter-by-key :hash sub-chan)))
-(register-constructor! :clj nt/filter-by-key make-filter-by-key-node)
+(register-constructor! this-runtime nt/filter-by-key make-filter-by-key-node)
 
 (def ^:private print-lock (Object.))
 (defn make-print-node
@@ -418,7 +420,7 @@
             (flush))))
       (recur (<! input)))
     (make-sink id nt/print)))
-(register-constructor! :clj nt/print make-print-node)
+(register-constructor! this-runtime nt/print make-print-node)
 
 (defn make-union-node
   [id [] inputs]
@@ -436,7 +438,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (map <!! inputs) value))))
     (make-node id nt/union :multiset sub-chan)))
-(register-constructor! :clj nt/union make-union-node)
+(register-constructor! this-runtime nt/union make-union-node)
 
 (defn make-subtract-node
   [id [] inputs]
@@ -454,7 +456,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (map <!! inputs) value))))
     (make-node id nt/subtract :multiset sub-chan)))
-(register-constructor! :clj nt/subtract make-subtract-node)
+(register-constructor! this-runtime nt/subtract make-subtract-node)
 
 (defn make-intersection-node
   [id [] inputs]
@@ -472,7 +474,7 @@
         (do (send-subscribers @subscribers false value id)
             (recur (map <!! inputs) value))))
     (make-node id nt/intersection :multiset sub-chan)))
-(register-constructor! :clj nt/intersection make-intersection-node)
+(register-constructor! this-runtime nt/intersection make-intersection-node)
 
 (defn make-distinct-node
   [id [] [input]]
@@ -490,4 +492,4 @@
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
     (make-node id nt/distinct :multiset sub-chan)))
-(register-constructor! :clj nt/distinct make-distinct-node)
+(register-constructor! this-runtime nt/distinct make-distinct-node)
