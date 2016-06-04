@@ -7,7 +7,8 @@
             [tamura.macros :as macros]
             [tamura.node-types :as nt]
             ;; We have to refer to runtimes as to make sure the constructors are registered and loaded
-            [tamura.runtimes.clj :as crt])
+            [tamura.runtimes.clj :as crt]
+            [tamura.runtimes.spark :as spark])
   (:use [tamura.coordinator]
         [tamura.datastructures]
         [tamura.node]
@@ -29,7 +30,9 @@
   []
   (when (started?)
     (throw (Exception. "already started")))
-  (build-nodes!)
+  (when (= (cfg/runtime) :spark)
+    (spark/setup-spark!))
+  (build-nodes! (cfg/runtime))
   (if-let [t (cfg/throttle?)]
     (threadloop []
       (Thread/sleep t)

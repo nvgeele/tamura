@@ -39,7 +39,12 @@
   :java-source-paths ["src/java"]
 
   :profiles {:dev
-             {:aot [examples.sparky]}
+             {:aot [
+                    ;examples.sparky
+                    tamura.runtimes.spark
+                    examples.sparkruntime
+                    ;tamura.runtimes.spark-test
+                    ]}
              :uberjar
              {:aot :all}}
 

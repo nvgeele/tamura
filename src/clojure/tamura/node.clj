@@ -136,6 +136,11 @@
   `(doseq [sub# ~subscribers]
      (>! sub# {:changed? ~changed? :value ~value :from ~id})))
 
+(defmacro send-subscribers*
+  [subscribers changed? rdd collection id]
+  `(doseq [sub# ~subscribers]
+     (>! sub# {:changed? ~changed? :value ~rdd :collection ~collection :from ~id})))
+
 (defmacro subscriber-loop
   [id channel subscribers]
   `(go-loop [in# (<! ~channel)]
