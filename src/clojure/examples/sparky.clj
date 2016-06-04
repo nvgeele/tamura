@@ -391,6 +391,23 @@
             (recur (map <!! inputs) value))))
     (Node. id ::intersection :multiset sub-chan)))
 
+(defn make-distinct-node
+  [id [] [input]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "distinct node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (f/distinct (:value msg))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (Node. id ::distinct :multiset sub-chan)))
+
 (defn make-filter-key-size-node
   [id [size] [input-node]]
   (let [sub-chan (chan)
@@ -770,6 +787,11 @@
   (let [id (new-id!)]
     (make-subtract-node id [] [left right])))
 
+(defn distinct*
+  [input]
+  (let [id (new-id!)]
+    (make-distinct-node id [] [input])))
+
 ;; TODO: correct behaviour for MULTISETS
 (defn intersection
   [left right]
@@ -810,17 +832,19 @@
         ;f1 (filter* r (f/fn [n] (= (mod n 5) 0)))
         ;f2 (filter* r (f/fn [n] (= (mod n 3) 0)))
         u (union f1 f2)
-        i (intersection f1 f2)
-        s1 (subtract f1 f2)
-        s2 (subtract f2 f1)
+        ;i (intersection f1 f2)
+        ;s1 (subtract f1 f2)
+        ;s2 (subtract f2 f1)
+        d (distinct* u)
         ]
     (print* r)
     (print* f1)
     (print* f2)
-    (print* u)
-    (print* i)
-    (print* s1)
-    (print* s2)
+    ;(print* u)
+    ;(print* i)
+    ;(print* s1)
+    ;(print* s2)
+    (print* d)
 
     ;(set-throttle! 1000)
     (start!)
