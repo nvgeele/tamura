@@ -1,4 +1,5 @@
-(ns tamura.node-types)
+(ns tamura.node-types
+  (:refer-clojure :exclude [delay delay? reduce map map? filter distinct distinct? print send]))
 
 (defmacro ^{:private true} defnode-type
   [name & ancestors]
