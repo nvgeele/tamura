@@ -401,3 +401,75 @@
       (recur (<! input)))
     (make-sink id nt/print)))
 (register-constructor! :clj nt/print make-print-node)
+
+(defn make-union-node
+  [id [] inputs]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        inputs (subscribe-inputs inputs)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msgs (map <!! inputs)
+              value (make-multiset)]
+      (log/debug (str "union node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [value (multiset-union (:value (first msgs)) (:value (second msgs)))]
+          (send-subscribers @subscribers true value id)
+          (recur (map <!! inputs) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (map <!! inputs) value))))
+    (make-node id nt/union :multiset sub-chan)))
+(register-constructor! :clj nt/union make-union-node)
+
+(defn make-subtract-node
+  [id [] inputs]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        inputs (subscribe-inputs inputs)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msgs (map <!! inputs)
+              value (make-multiset)]
+      (log/debug (str "subtract node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [value (multiset-subtract (:value (first msgs)) (:value (second msgs)))]
+          (send-subscribers @subscribers true value id)
+          (recur (map <!! inputs) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (map <!! inputs) value))))
+    (make-node id nt/subtract :multiset sub-chan)))
+(register-constructor! :clj nt/subtract make-subtract-node)
+
+(defn make-intersection-node
+  [id [] inputs]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        inputs (subscribe-inputs inputs)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msgs (map <!! inputs)
+              value (make-multiset)]
+      (log/debug (str "intersection node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [value (multiset-intersection (:value (first msgs)) (:value (second msgs)))]
+          (send-subscribers @subscribers true value id)
+          (recur (map <!! inputs) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (map <!! inputs) value))))
+    (make-node id nt/intersection :multiset sub-chan)))
+(register-constructor! :clj nt/intersection make-intersection-node)
+
+(defn make-distinct-node
+  [id [] [input]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (make-multiset)]
+      (log/debug (str "distinct node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (multiset-distinct (:value msg))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/distinct :multiset sub-chan)))
+(register-constructor! :clj nt/distinct make-distinct-node)

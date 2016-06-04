@@ -231,6 +231,40 @@
   (let [k print*]
     `(~k ~input-form (quote ~input-form))))
 
+(core/defn union
+  [left right]
+  (assert*
+    (and (signal? left) (signal? right)) "arguments to union must be signals"
+    (and (= (:return-type (get-node (signal-value left))) :multiset)
+         (= (:return-type (get-node (signal-value right))) :multiset))
+    "inputs for union must be multisets")
+  (make-signal (register-node! nt/union :multiset [] [(signal-value left) (signal-value right)])))
+
+(core/defn subtract
+  [left right]
+  (assert*
+    (and (signal? left) (signal? right)) "arguments to subtract must be signals"
+    (and (= (:return-type (get-node (signal-value left))) :multiset)
+         (= (:return-type (get-node (signal-value right))) :multiset))
+    "inputs for subtract must be multisets")
+  (make-signal (register-node! nt/subtract :multiset [] [(signal-value left) (signal-value right)])))
+
+(core/defn intersection
+  [left right]
+  (assert*
+    (and (signal? left) (signal? right)) "arguments to intersection must be signals"
+    (and (= (:return-type (get-node (signal-value left))) :multiset)
+         (= (:return-type (get-node (signal-value right))) :multiset))
+    "inputs for intersection must be multisets")
+  (make-signal (register-node! nt/intersection :multiset [] [(signal-value left) (signal-value right)])))
+
+(core/defn distinct
+  [input]
+  (assert*
+    (signal? input) "argument to distinct must be signal"
+    (= (:return-type (get-node (signal-value input))) :multiset) "argument to distinct must be multiset")
+  (make-signal (register-node! nt/distinct :multiset [] [(signal-value input)])))
+
 (core/defn -main
   [& args]
   (println "Ready"))

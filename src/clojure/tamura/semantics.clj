@@ -230,6 +230,36 @@
   {:a #{1 2} :b #{1}}   => {:a #{2}}
   {:a #{1 2} :b #{1 2}} => {:a #{2} :b #{2}})
 
+(comment "Semantics for union"
+  "multiset"
+  #{} #{}       => #{}
+  #{1} #{}      => #{1}
+  #{1} #{2}     => #{1 2}
+  #{1} #{2 1}   => #{1 1 2}
+  #{1 1} #{2 1} => #{1 1 2})
+
+(comment "Semantics for subtract"
+  "multiset"
+  #{} #{}     => #{}
+  #{1} #{}    => #{1}
+  #{1} #{2}   => #{1}
+  #{1} #{2 1} => #{})
+
+(comment "Semantics for intersection"
+  "multiset"
+  #{} #{}           => #{}
+  #{1} #{}          => #{}
+  #{1} #{2}         => #{}
+  #{1} #{2 1}       => #{1}
+  #{1 2} #{2 1}     => #{1 2}
+  #{1 2 2} #{2 1 2} => #{1 2 2})
+
+(comment "Semantics for distinct"
+  "multiset"
+  #{}      => #{}
+  #{2}     => #{2}
+  #{2 2 1} => #{1 2})
+
 (comment "Semantics source with time-based leasing (10 seconds)"
   "multiset"
 

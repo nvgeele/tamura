@@ -14,6 +14,9 @@
 (def ^:dynamic *input-type* nil)
 (def ^:dynamic *return-type* nil)
 
+(def ^:dynamic *source-id2* nil)
+(def ^:dynamic *source-chan2* nil)
+
 (def test-fns (atom []))
 
 ;; NOTE: the node-init function takes the source node for the test as its sole argument
@@ -37,6 +40,27 @@
                                       *return-type* (:return-type out-node#)]
                               ~@body)))))
 
+;; I know this approach is a bit messy...
+(defmacro test-binode
+  [input-type node-init & body]
+  `(let [source-id1# (new-id!)
+         source-id2# (new-id!)
+         source-node1# (cr/make-source-node source-id1# [~input-type] [])
+         source-node2# (cr/make-source-node source-id2# [~input-type] [])
+         init# ~node-init
+         test-chan# (chan)
+         out-node# (init# source-node1# source-node2#)]
+     (n/node-subscribe out-node# test-chan#)
+     (swap! test-fns conj (fn []
+                            (binding [*source-id* source-id1#
+                                      *source-id2* source-id2#
+                                      *source-chan* (:in source-node1#)
+                                      *source-chan2* (:in source-node2#)
+                                      *test-chan* test-chan#
+                                      *input-type* ~input-type
+                                      *return-type* (:return-type out-node#)]
+                              ~@body)))))
+
 (defmacro test-multiset-node
   [node-init & body]
   `(test-node :multiset false false ~node-init ~@body))
@@ -49,7 +73,7 @@
   ([value]
    (>!! *source-chan* {:destination *source-id* :value value}))
   ([key val]
-   (send [key val])))
+   (>!! *source-chan* {:destination *source-id* :value [key val]})))
 
 (defn receive-hash
   []
@@ -72,6 +96,22 @@
    (receive))
   ([key val]
    (send-receive [key val])))
+
+(defn bi-send
+  [value source]
+  (let [msg {:destination (if (= source 1)
+                            *source-id*
+                            *source-id2*)
+             :value value}]
+    (>!! *source-chan* msg)
+    (>!! *source-chan2* msg)))
+
+(defn bi-send-receive
+  ([value source]
+    (bi-send value source)
+    (receive))
+  ([key val source]
+    (bi-send-receive [key val] source)))
 
 ;; TODO: capture test metadata
 (defn do-tests
@@ -352,5 +392,37 @@
     (send-receive :b 1) => {}
     (send-receive :a 2) => {:a (ms/multiset 2)}
     (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2)}))
+
+(facts "about union"
+  (test-binode :multiset #(cr/make-union-node (new-id!) [] [%1 %2])
+    (println "union")
+    (bi-send-receive 1 1) => (ms/multiset 1)
+    (bi-send-receive 2 2) => (ms/multiset 1 2)
+    (bi-send-receive 1 2) => (ms/multiset 1 2)
+    (bi-send-receive 1 1) => (ms/multiset 1 1 2)))
+
+(facts "about subtract"
+  (test-binode :multiset #(cr/make-subtract-node (new-id!) [] [%1 %2])
+    (println "subtract")
+    (bi-send-receive 1 1) => (ms/multiset 1)
+    (bi-send-receive 2 2) => (ms/multiset 1)
+    (bi-send-receive 1 2) => (ms/multiset)))
+
+(facts "about intersection"
+  (test-binode :multiset #(cr/make-intersection-node (new-id!) [] [%1 %2])
+    (println "intersection")
+    (bi-send-receive 1 1) => (ms/multiset)
+    (bi-send-receive 2 2) => (ms/multiset)
+    (bi-send-receive 1 2) => (ms/multiset 1)
+    (bi-send-receive 2 1) => (ms/multiset 1 2)
+    (bi-send-receive 2 1)
+    (bi-send-receive 2 2) => (ms/multiset 1 2 2)))
+
+(facts "about distinct"
+  (test-multiset-node #(cr/make-distinct-node (new-id!) [] [%])
+    (println "distinct")
+    (send-receive 2) => (ms/multiset 2)
+    (send-receive 1) => (ms/multiset 1 2)
+    (send-receive 2) => (ms/multiset 1 2)))
 
 (do-tests)

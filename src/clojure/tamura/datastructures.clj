@@ -31,10 +31,13 @@
 ;; TODO: tests for reduce
 ;; TODO: tests for multiset-map
 ;; TODO: tests for multiset-filter
+;; TODO: tests for union, subtract, intersection, and distinct
 (defprotocol MultiSet
   (multiset-contains? [this val])
-  (multiset-minus [this r])
   (multiset-union [this r])
+  (multiset-subtract [this r])
+  (multiset-intersection [this r])
+  (multiset-distinct [this])
   (multiset-reduce [this f] [this f initial])
   (multiset-map [this f])
   (multiset-filter [this f])
@@ -79,12 +82,20 @@
   MultiSet
   (multiset-contains? [this val]
     (contains? ms val))
-  (multiset-minus [this r]
-    (-> (ms/minus (.ms this) (.ms r))
-        (RegularMultiSet. [] [])))
   (multiset-union [this r]
     (-> (ms/union (.ms this) (.ms r))
         (RegularMultiSet. [] [])))
+  (multiset-subtract [this r]
+    (-> (ms/minus (.ms this) (.ms r))
+        (RegularMultiSet. [] [])))
+  (multiset-intersection [this r]
+    (-> (ms/intersect (.ms this) (.ms r))
+        (RegularMultiSet. [] [])))
+  (multiset-distinct [this]
+    (if (empty? ms)
+      this
+      (-> (apply ms/multiset (distinct (vec ms)))
+          (RegularMultiSet. [] []))))
   (multiset-reduce [this f]
     (if (empty? ms)
       (RegularMultiSet. (ms/multiset) [] [])
