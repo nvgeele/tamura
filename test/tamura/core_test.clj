@@ -4,7 +4,8 @@
   (:require [tamura.core :as core]
             [clojure.core.async :as a :refer [>!! <!!]]
             [multiset.core :as ms]
-            [clj-time.core :as t]))
+            [clj-time.core :as t]
+            [tamura.util :refer [chan]]))
 
 (def ^:dynamic *source-id* nil)
 (def ^:dynamic *source-chan* nil)
@@ -22,7 +23,7 @@
   `(let [source-id# (core/new-id!)
          source-node# (core/make-source-node source-id# [~input-type :timeout ~timeout :buffer ~buffer] [])
          init# ~node-init
-         test-chan# (core/chan)
+         test-chan# (chan)
          out-node# (if init#
                      (init# source-node#)
                      source-node#)]

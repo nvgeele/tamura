@@ -10,7 +10,9 @@
             [tamura.macros :as macros]
             [tamura.node-types :as nt]
             [tamura.values :as v])
-  (:use [tamura.datastructures])
+  (:use [tamura.coordinator]
+        [tamura.datastructures]
+        [tamura.util])
   (:import [redis.clients.jedis Jedis]))
 
 (p/import-vars
@@ -19,67 +21,13 @@
    defn
    defsig])
 
-(defmacro ^{:private true} assert-args
-  [& pairs]
-  `(do (when-not ~(first pairs)
-         (throw (IllegalArgumentException.
-                  (str (first ~'&form) " requires " ~(second pairs) " in " ~'*ns* ":" (:line (meta ~'&form))))))
-       ~(let [more (nnext pairs)]
-          (when more
-            (list* `assert-args more)))))
-
-(defmacro assert*
-  [& pairs]
-  (assert-args
-    (>= (count pairs) 2) "2 or more expressions in the body"
-    (even? (count pairs)) "an even amount of expressions")
-  `(do (assert ~(first pairs) ~(second pairs))
-       ~(let [more (nnext pairs)]
-          (when more
-            (list* `assert* more)))))
-
-(defmacro when-let*
-  "bindings => [bindingform test ...]"
-  [bindings & body]
-  (assert-args
-    (vector? bindings) "a vector for its binding"
-    (>= (count bindings) 2) "2 or more forms in binding vector"
-    (even? (count bindings)) "even amount of bindings")
-  (let [form (bindings 0) tst (bindings 1)]
-    `(let [temp# ~tst]
-       (when temp#
-         (let [~form temp#
-               ~@(rest (rest bindings))]
-           ~@body)))))
-
-;; TODO: as macro? Because performance, it's the name of the game
-(core/defn ormap
-  [f lst]
-  (loop [l lst]
-    (cond
-      (empty? l) false
-      (f (first l)) true
-      :else (recur (rest l)))))
-
-(core/defn andmap
-  [f lst]
-  (loop [l lst]
-    (cond (empty? l) true
-          (f (first l)) (recur (rest lst))
-          :else false)))
-
 ;; TODO: define some sinks
 ;; TODO: all sink operators are Actors, not Reactors;; make sure nothing happens when changed? = false
 ;; TODO: let coordinator keep list of producers, so we can have something like (coordinator-start) to kick-start errting
-(defrecord Coordinator [in])
 (defrecord Node [id node-type return-type sub-chan])
 (defrecord Source [id node-type return-type sub-chan in]) ;; isa Node
 (defrecord Sink [id node-type])                           ;; isa Node
 
-(def buffer-size 32)
-(defmacro chan
-  ([] `(a/chan ~buffer-size))
-  ([size] `(a/chan ~size)))
 (def counter (atom 0))
 (core/defn new-id!
   []
@@ -88,8 +36,6 @@
 (defmacro node-subscribe
   [source channel]
   `(>!! (:sub-chan ~source) {:subscribe ~channel}))
-
-(declare ^:dynamic ^:private *coordinator*)
 
 (def nodes (atom {}))
 (def sources (atom []))
@@ -173,14 +119,6 @@
   [runtime node-type constructor]
   (swap! node-constructors assoc-in [runtime node-type] constructor))
 
-(core/defn- started?
-  []
-  (let [c (chan 0)
-        s (do (>!! (:in *coordinator*) {:started? c})
-              (<!! c))]
-    (a/close! c)
-    s))
-
 (core/defn start!
   []
   (when (started?)
@@ -223,39 +161,6 @@
 (defmacro threadloop
   [bindings & body]
   `(thread (loop ~bindings ~@body)))
-
-;; TODO: phase2 of multiclock reactive programming (detect when construction is done) (or cheat and Thread/sleep)
-(core/defn make-coordinator
-  []
-  (let [in (chan)]
-    (go-loop [msg (<! in)
-              started? false
-              sources []]
-      (log/debug (str "coordinator received: " msg))
-      (match msg
-        {:new-source source-chan}
-        (if started?
-          (throw (Exception. "can not add new sources when already running"))
-          (recur (<! in) started? (cons source-chan sources)))
-
-        {:destination id :value value}
-        (do (when started?
-              (doseq [source sources]
-                (>! source msg)))
-            (recur (<! in) started? sources))
-
-        {:started? reply-channel}
-        (do (>! reply-channel started?)
-            (recur (<! in) started? sources))
-
-        :start (recur (<! in) true sources)
-
-        :stop (recur (<! in) false [])
-
-        :reset (recur (<! in) false [])
-
-        :else (recur (<! in) started? sources)))
-    (Coordinator. in)))
 
 (core/defn subscribe-input
   [input]
@@ -657,8 +562,6 @@
             (recur (<! input) value))))
     (Node. id nt/filter-by-key :hash sub-chan)))
 (register-constructor! :clj nt/filter-by-key make-filter-by-key-node)
-
-(def ^:dynamic ^:private *coordinator* (make-coordinator))
 
 (core/defn- make-signal
   [node]
