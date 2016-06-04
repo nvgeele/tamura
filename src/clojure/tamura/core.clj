@@ -2,9 +2,6 @@
   (:require [clojure.core :as core]
             [clojure.core.async :as a :refer [>!! >! <!! <! go go-loop]]
             [clojure.core.match :refer [match]]
-            [clojure.edn :as edn]
-            [clojure.tools.logging :as log]
-            [multiset.core :as ms]
             [potemkin :as p]
             [tamura.macros :as macros]
             [tamura.node-types :as nt]
@@ -21,6 +18,11 @@
    def
    defn
    defsig])
+
+;; TODO: set-up for Spark and so on
+(core/defn setup!
+  [config]
+  (throw (Exception. "ToDo")))
 
 (core/defn start!
   []
