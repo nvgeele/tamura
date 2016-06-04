@@ -289,6 +289,51 @@
     (make-node id nt/diff-remove :multiset sub-chan)))
 (register-constructor! this-runtime nt/diff-remove make-diff-remove-node)
 
+(defn make-multiplicities-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "multiplicities node" id " has received: " msg))
+      ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
+      (if (:changed? msg)
+        (let [value (if (.isEmpty (:value msg))
+                      (:value msg)
+                      (-> (:value msg)
+                          (f/aggregate {} multiplicities-seq-fn multiplicities-com-fn)
+                          ((fn [m] (f/parallelize sc (vec m))))))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/multiplicities :multiset sub-chan)))
+(register-constructor! this-runtime nt/multiplicities make-multiplicities-node)
+
+(defn make-filter-key-size-node
+  [id [size] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        filter-fn (tamura.runtimes.FilterKeySizeFunction. size)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "filter-key-size node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/group-by-key)
+                        (.filter filter-fn)
+                        (f/flat-map-values spark-identity))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/filter-key-size :hash sub-chan)))
+(register-constructor! this-runtime nt/filter-key-size make-filter-key-size-node)
+
 (comment
   (defn make-union-node
     [id [] inputs]
@@ -361,27 +406,6 @@
           (do (send-subscribers @subscribers false value id)
               (recur (<! input) value))))
       (Node. id ::distinct :multiset sub-chan)))
-
-  (defn make-filter-key-size-node
-    [id [size] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)
-          filter-fn (examples.FilterKeySizeFunction. size)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "filter-key-size node" id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (-> (:value msg)
-                          (f/group-by-key)
-                          (.filter filter-fn)
-                          (f/flat-map-values spark-identity))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::filter-key-size :hash sub-chan)))
 
   ;; TODO: initial
   (defn make-reduce-by-key-node
@@ -460,28 +484,6 @@
           (do (send-subscribers @subscribers false value id)
               (recur (<! input) value))))
       (Node. id ::map-by-key :hash sub-chan)))
-
-  (defn make-multiplicities-node
-    [id [] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "multiplicities node" id " has received: " msg))
-        ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
-        (if (:changed? msg)
-          (let [value (if (.isEmpty (:value msg))
-                        (:value msg)
-                        (-> (:value msg)
-                            (f/aggregate {} multiplicities-seq-fn multiplicities-com-fn)
-                            ((fn [m] (f/parallelize sc (vec m))))))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::multiplicities :multiset sub-chan)))
 
   ;; TODO: initial
   (defn make-reduce-node

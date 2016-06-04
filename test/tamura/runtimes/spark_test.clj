@@ -304,24 +304,25 @@
       (send-receive :a 2) => (ms/multiset)
       (send-receive :a 3) => (ms/multiset [:a 1]))))
 
+(facts "about make-multiplicities-node"
+  (test-multiset-node #(spark/make-multiplicities-node (new-id!) [] [%])
+    (send-receive 'a) => (ms/multiset ['a 1])
+    (send-receive 'b) => (ms/multiset ['a 1] ['b 1])
+    (send-receive 'b) => (ms/multiset ['a 1] ['b 2])))
+
+(facts "about filter-key-size node (size 2)"
+  (test-hash-node #(spark/make-filter-key-size-node (new-id!) [2] [%])
+    (send-receive :a 1) => {}
+    (send-receive :b 1) => {}
+    (send-receive :a 2) => {:a (ms/multiset 1 2)}
+    (send-receive :b 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
+    (send-receive :b 3) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2 3)}))
+
 (do-tests)
 
 (comment
 
 
-  (facts "about make-multiplicities-node"
-    (test-multiset-node #(spark/make-multiplicities-node (new-id!) [] [%])
-                        (send-receive 'a) => (ms/multiset ['a 1])
-                        (send-receive 'b) => (ms/multiset ['a 1] ['b 1])
-                        (send-receive 'b) => (ms/multiset ['a 1] ['b 2])))
-
-  (facts "about filter-key-size node (size 2)"
-    (test-hash-node #(spark/make-filter-key-size-node (new-id!) [2] [%])
-                    (send-receive :a 1) => {}
-                    (send-receive :b 1) => {}
-                    (send-receive :a 2) => {:a (ms/multiset 1 2)}
-                    (send-receive :b 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
-                    (send-receive :b 3) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2 3)}))
 
   (facts "about reduce, function (fn [a b] (+ a b))"
     (facts "multiset (no initial)"
