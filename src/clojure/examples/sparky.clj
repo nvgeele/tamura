@@ -345,7 +345,7 @@
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msgs (map <!! inputs)
               value (emptyRDD)]
-      (log/debug (str "union-node " id " has received: " msgs))
+      (log/debug (str "union node " id " has received: " msgs))
       (if (ormap :changed? msgs)
         (let [value (f/union (:value (first msgs))
                              (:value (second msgs)))]
@@ -354,6 +354,42 @@
         (do (send-subscribers @subscribers false value id)
             (recur (map <!! inputs) value))))
     (Node. id ::union :multiset sub-chan)))
+
+(defn make-subtract-node
+  [id [] inputs]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        inputs (subscribe-inputs inputs)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msgs (map <!! inputs)
+              value (emptyRDD)]
+      (log/debug (str "subtract node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [value (f/subtract (:value (first msgs))
+                                (:value (second msgs)))]
+          (send-subscribers @subscribers true value id)
+          (recur (map <!! inputs) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (map <!! inputs) value))))
+    (Node. id ::subtract :multiset sub-chan)))
+
+(defn make-intersection-node
+  [id [] inputs]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        inputs (subscribe-inputs inputs)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msgs (map <!! inputs)
+              value (emptyRDD)]
+      (log/debug (str "intersection node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [value (.intersection (:value (first msgs))
+                                   (:value (second msgs)))]
+          (send-subscribers @subscribers true value id)
+          (recur (map <!! inputs) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (map <!! inputs) value))))
+    (Node. id ::intersection :multiset sub-chan)))
 
 (defn make-filter-key-size-node
   [id [size] [input-node]]
@@ -661,7 +697,9 @@
                   (-> (:value msg)
                       (collector)
                       (pprint)))]
-          (println* (str form ": " s))))
+          (locking print-lock
+            (print (str form ": " s))
+            (flush))))
       (recur (<! input)))))
 
 (defmacro print*
@@ -727,9 +765,16 @@
   (let [id (new-id!)]
     (make-union-node id [] [left right])))
 
-;; TODO: union
-;; TODO: difference
-;; TODO: intersect
+(defn subtract
+  [left right]
+  (let [id (new-id!)]
+    (make-subtract-node id [] [left right])))
+
+;; TODO: correct behaviour for MULTISETS
+(defn intersection
+  [left right]
+  (let [id (new-id!)]
+    (make-intersection-node id [] [left right])))
 
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
@@ -757,13 +802,27 @@
                  :master   "local[*]"})
 
   (comment)
-  (let [r1 (redis "localhost" "q1")
-        f1 (filter* r1 even?)
-        r2 (redis "localhost" "q2" :key :id)
-        f2 (filter-by-key r2 (comp even? :v))]
+  (let [r (redis "localhost" "q1")
+        ;f1 (filter* r even?)
+        ;f2 (filter* r odd?)
+        f1 (filter* r #(= (mod % 5) 0))
+        f2 (filter* r #(= (mod % 3) 0))
+        ;f1 (filter* r (f/fn [n] (= (mod n 5) 0)))
+        ;f2 (filter* r (f/fn [n] (= (mod n 3) 0)))
+        u (union f1 f2)
+        i (intersection f1 f2)
+        s1 (subtract f1 f2)
+        s2 (subtract f2 f1)
+        ]
+    (print* r)
     (print* f1)
     (print* f2)
+    (print* u)
+    (print* i)
+    (print* s1)
+    (print* s2)
 
+    ;(set-throttle! 1000)
     (start!)
     (println "Let's go"))
 
