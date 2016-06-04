@@ -587,18 +587,36 @@
         (recur (<! input) previous-c previous-r)))
     (Node. id ::delay (:return-type input-node) sub-chan)))
 
+(gen-class
+  :name examples.FilterFunction
+  :implements [org.apache.spark.api.java.function.Function]
+  :state state
+  :init init
+  :constructors {[Object] []}
+  :prefix "filter-function-")
+
+(defn filter-function-init
+  [pred]
+  [[] pred])
+
+(defn filter-function-call ^Boolean
+  [this val]
+  (let [pred (.state this)]
+    (pred val)))
+
 (defn make-filter-node
   [id [pred] [input-node]]
   (let [sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        pred (examples.FilterFunction. pred)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (emptyRDD)]
       (log/debug (str "filter node " id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
-                        (f/filter pred))]
+                        (.filter pred))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
