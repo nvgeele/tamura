@@ -38,7 +38,3 @@
 (deftag Signal Value)
 (deftag EventStream Signal)
 (deftag Behaviour Signal)
-
-(defprotocol Reactor
-  (current [this])
-  (next [this]))

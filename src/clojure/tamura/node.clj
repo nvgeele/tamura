@@ -91,22 +91,25 @@
 
 ;; TODO: maybe write some tests?
 ;; TODO: check here that inputs aren't sinks?
-(defn build-nodes! []
-  (loop [sorted (sort-nodes)]
-    (if (empty? sorted)
-      true
-      (let [id (first sorted)
-            node (get @nodes id)
-            inputs (map #(:node (get @nodes %)) (:inputs node))
-            node-obj ((get @node-constructors (:node-type node)) id (:args node) inputs)]
-        (swap! nodes update-in [id :node] (constantly node-obj))
-        (if (nt/source? (:node-type node))
-          (>!! (:in *coordinator*) {:new-source (:in node-obj)})
-          (>!! (:in *coordinator*) :else))
-        (recur (rest sorted))))))
+(defn build-nodes!
+  ([] (build-nodes! :clj))
+  ([runtime]
+   (loop [sorted (sort-nodes)]
+     (if (empty? sorted)
+       true
+       (let [id (first sorted)
+             node (get @nodes id)
+             inputs (map #(:node (get @nodes %)) (:inputs node))
+             node-obj ((get-in @node-constructors [runtime (:node-type node)]) id (:args node) inputs)]
+         (swap! nodes update-in [id :node] (constantly node-obj))
+         (if (nt/source? (:node-type node))
+           (>!! (:in *coordinator*) {:new-source (:in node-obj)})
+           (>!! (:in *coordinator*) :else))
+         (recur (rest sorted)))))))
 
 (defn register-constructor!
   [runtime node-type constructor]
+  (println "register-constructor!")
   (swap! node-constructors assoc-in [runtime node-type] constructor))
 
 (defmacro thread
