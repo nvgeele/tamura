@@ -109,7 +109,6 @@
 
 (defn register-constructor!
   [runtime node-type constructor]
-  (println "register-constructor!")
   (swap! node-constructors assoc-in [runtime node-type] constructor))
 
 (defmacro thread
