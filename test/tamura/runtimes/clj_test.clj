@@ -1,4 +1,5 @@
 (ns tamura.runtimes.clj-test
+  (:refer-clojure :exclude [send])
   (:use midje.sweet
         tamura.datastructures)
   (:require [clojure.core.async :as a :refer [>!! <!!]]
@@ -114,6 +115,7 @@
     (bi-send-receive [key val] source)))
 
 ;; TODO: capture test metadata
+;; TODO: reset and thing
 (defn do-tests
   []
   ;; NOTE: we currently bypass the coordinator, so we do not need to start
