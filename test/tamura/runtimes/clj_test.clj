@@ -395,7 +395,6 @@
 
 (facts "about union"
   (test-binode :multiset #(cr/make-union-node (new-id!) [] [%1 %2])
-    (println "union")
     (bi-send-receive 1 1) => (ms/multiset 1)
     (bi-send-receive 2 2) => (ms/multiset 1 2)
     (bi-send-receive 1 2) => (ms/multiset 1 2)
@@ -403,14 +402,12 @@
 
 (facts "about subtract"
   (test-binode :multiset #(cr/make-subtract-node (new-id!) [] [%1 %2])
-    (println "subtract")
     (bi-send-receive 1 1) => (ms/multiset 1)
     (bi-send-receive 2 2) => (ms/multiset 1)
     (bi-send-receive 1 2) => (ms/multiset)))
 
 (facts "about intersection"
   (test-binode :multiset #(cr/make-intersection-node (new-id!) [] [%1 %2])
-    (println "intersection")
     (bi-send-receive 1 1) => (ms/multiset)
     (bi-send-receive 2 2) => (ms/multiset)
     (bi-send-receive 1 2) => (ms/multiset 1)
@@ -420,7 +417,6 @@
 
 (facts "about distinct"
   (test-multiset-node #(cr/make-distinct-node (new-id!) [] [%])
-    (println "distinct")
     (send-receive 2) => (ms/multiset 2)
     (send-receive 1) => (ms/multiset 1 2)
     (send-receive 2) => (ms/multiset 1 2)))
