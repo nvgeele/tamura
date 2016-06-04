@@ -69,7 +69,7 @@
       (do-op d/multiset-insert 3) => (ms/multiset 2 3)
       (Thread/sleep 3000)
       (do-op d/multiset-insert 4) => (ms/multiset 4)
-      (do-fn d/multiset-removed) => [2 3]
+      (do-fn d/multiset-removed) => (just [2 3] :in-any-order)
       (do-op d/multiset-copy)
       (Thread/sleep 2100)
       (do-op d/multiset-insert* 5)
@@ -88,14 +88,14 @@
       (do-op d/multiset-insert 5) => (ms/multiset 4 5)
       (Thread/sleep 2100)
       (do-op d/multiset-insert 1) => (ms/multiset 1)
-      (do-fn d/multiset-removed) => [4 5]
+      (do-fn d/multiset-removed) => (just [4 5] :in-any-order)
       (do-op d/multiset-copy)
       (Thread/sleep 2100)
       (do-op d/multiset-insert* 5)
       (do-op d/multiset-insert* 6)
       (do-op d/multiset-insert* 7)
       (do-fn d/multiset-inserted) => [5 6 7]
-      (do-fn d/multiset-removed) => [1 5])))
+      (do-fn d/multiset-removed) => (just [1 5] :in-any-order))))
 
 (facts "about hashes"
   (facts "about regular hashes"
@@ -160,7 +160,7 @@
       (Thread/sleep 2100)
       (do-op d/hash-insert* :b 1)
       (do-fn d/hash-inserted) => [[:a 1] [:a 2] [:b 1]]
-      (do-fn d/hash-removed) => [[:a 2] [:a 1]]))
+      (do-fn d/hash-removed) => (just [[:a 2] [:a 1]] :in-any-order)))
   (facts "about buffered & timed hashes"
     (test-with (d/make-timed-buffered-hash (t/seconds 2) 2)
       (do-op d/hash-insert :a 1) => {:a (ms/multiset 1)}
@@ -184,4 +184,4 @@
       (Thread/sleep 2100)
       (do-op d/hash-insert* :b 1)
       (do-fn d/hash-inserted) => [[:a 1] [:a 2] [:a 3] [:b 1]]
-      (do-fn d/hash-removed) => [[:a 1] [:a 2] [:a 3]])))
+      (do-fn d/hash-removed) => (just [[:a 1] [:a 2] [:a 3]] :in-any-order))))
