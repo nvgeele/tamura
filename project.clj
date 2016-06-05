@@ -42,8 +42,9 @@
              {:aot [
                     ;examples.sparky
                     tamura.runtimes.spark
-                    examples.sparkruntime
                     tamura.runtimes.spark-test-utils
+                    examples.sparkruntime
+                    examples.bxl-direct-spark
                     ;tamura.runtimes.spark-test
                     ]}
              :uberjar
