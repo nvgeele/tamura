@@ -350,6 +350,19 @@
     (send-receive :b 1) => (ms/multiset [:a 1] [:b 1])
     (send-receive :b 2) => (ms/multiset [:a 1] [:b 1] [:b 2])))
 
+(facts "about filter, function even?"
+  (test-multiset-node #(spark/make-filter-node (new-id!) [even?] [%])
+    (send-receive 1) => (ms/multiset)
+    (send-receive 2) => (ms/multiset 2)
+    (send-receive 3) => (ms/multiset 2)))
+
+(facts "about filter-by-key, function even?"
+  (test-hash-node #(spark/make-filter-by-key-node (new-id!) [even?] [%])
+    (send-receive :a 1) => {}
+    (send-receive :b 1) => {}
+    (send-receive :a 2) => {:a (ms/multiset 2)}
+    (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2)}))
+
 (do-tests)
 
 (comment
@@ -365,21 +378,6 @@
       (send-receive :a 1) => {:a (ms/multiset 2)}
       (send-receive :b 1) => {:a (ms/multiset 2) :b (ms/multiset 2)}
       (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2 3)})))
-
-(comment
-  (facts "about filter, function even?"
-    (test-multiset-node #(spark/make-filter-node (new-id!) [even?] [%])
-      (send-receive 1) => (ms/multiset)
-      (send-receive 2) => (ms/multiset 2)
-      (send-receive 3) => (ms/multiset 2))))
-
-(comment
-  (facts "about filter-by-key, function even?"
-    (test-hash-node #(spark/make-filter-by-key-node (new-id!) [even?] [%])
-      (send-receive :a 1) => {}
-      (send-receive :b 1) => {}
-      (send-receive :a 2) => {:a (ms/multiset 2)}
-      (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2)})))
 
 (comment
   (facts "about union"
