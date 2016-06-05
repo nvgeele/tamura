@@ -43,6 +43,7 @@
                     ;examples.sparky
                     tamura.runtimes.spark
                     examples.sparkruntime
+                    tamura.runtimes.spark-test-utils
                     ;tamura.runtimes.spark-test
                     ]}
              :uberjar

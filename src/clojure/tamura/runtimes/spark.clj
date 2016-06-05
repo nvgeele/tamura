@@ -23,6 +23,7 @@
 
 ;; TODO: (future work) type hints
 ;; TODO: (future work) wrap all functions in map and filter in a serialisable
+;; TODO: (:gen-class) everywhere
 
 ;;;; SET-UP & CONFIG ;;;;
 
@@ -118,6 +119,23 @@
   (let [size (.state this)
         vals (._2 val)]
     (>= (count vals) size)))
+
+(gen-class
+  :name tamura.runtimes.ReduceFunction
+  :implements [org.apache.spark.api.java.function.Function2]
+  :state state
+  :init init
+  :constructors {[Object] []}
+  :prefix "reduce-function-")
+
+(defn reduce-function-init
+  [f]
+  [[] f])
+
+(defn reduce-function-call ^Boolean
+[this lval rval]
+  (let [f (.state this)]
+    (f lval rval)))
 
 ;;;; PRIMITIVES ;;;;
 
@@ -334,7 +352,112 @@
     (make-node id nt/filter-key-size :hash sub-chan)))
 (register-constructor! this-runtime nt/filter-key-size make-filter-key-size-node)
 
+;; TODO: initial
+;; TODO: wrap function
+(defn make-reduce-node
+  [id [f initial] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        reduce-fn (tamura.runtimes.ReduceFunction. f)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "reduce node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (if (.isEmpty (:value msg))
+                      (:value msg)
+                      (-> (:value msg)
+                          (.reduce reduce-fn)
+                          ((fn [e] (f/parallelize sc [e])))))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/reduce :multiset sub-chan)))
+(register-constructor! this-runtime nt/reduce make-reduce-node)
+
+;; TODO: initial
+;; TODO: wrap function
+(defn make-reduce-by-key-node
+  [id [fn initial] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        reduce-fn (tamura.runtimes.ReduceFunction. fn)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "reduce-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (if (.isEmpty (:value msg))
+                      (:value msg)
+                      (-> (:value msg)
+                          (.reduceByKey reduce-fn)))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/reduce-by-key :hash sub-chan)))
+(register-constructor! this-runtime nt/reduce-by-key make-reduce-by-key-node)
+
 (comment
+  (gen-class
+    :name examples.FilterFunction
+    :implements [org.apache.spark.api.java.function.Function]
+    :state state
+    :init init
+    :constructors {[Object] []}
+    :prefix "filter-function-")
+
+  (defn filter-function-init
+    [pred]
+    [[] pred])
+
+  (defn filter-function-call ^Boolean
+  [this val]
+    (let [pred (.state this)]
+      (pred val)))
+
+  (defn make-filter-node
+    [id [pred] [input-node]]
+    (let [sub-chan (chan)
+          subscribers (atom [])
+          input (subscribe-input input-node)
+          pred (examples.FilterFunction. pred)]
+      (subscriber-loop id sub-chan subscribers)
+      (go-loop [msg (<! input)
+                value (emptyRDD)]
+        (log/debug (str "filter node " id " has received: " msg))
+        (if (:changed? msg)
+          (let [value (-> (:value msg)
+                          (.filter pred))]
+            (send-subscribers @subscribers true value id)
+            (recur (<! input) value))
+          (do (send-subscribers @subscribers false value id)
+              (recur (<! input) value))))
+      (Node. id ::filter :multiset sub-chan)))
+
+  ;; TODO: use serialisable function?
+  (defn make-filter-by-key-node
+    [id [pred] [input-node]]
+    (let [sub-chan (chan)
+          subscribers (atom [])
+          input (subscribe-input input-node)
+          filter-fn (fn/function (fn [^Tuple2 t] (pred (._2 t))))]
+      (subscriber-loop id sub-chan subscribers)
+      (go-loop [msg (<! input)
+                value (emptyRDD)]
+        (log/debug (str "filter-by-key node " id " has received: " msg))
+        (if (:changed? msg)
+          (let [value (-> (:value msg)
+                          (.filter filter-fn))]
+            (send-subscribers @subscribers true value id)
+            (recur (<! input) value))
+          (do (send-subscribers @subscribers false value id)
+              (recur (<! input) value))))
+      (Node. id ::filter-by-key :hash sub-chan)))
+
   (defn make-union-node
     [id [] inputs]
     (let [sub-chan (chan)
@@ -407,27 +530,6 @@
               (recur (<! input) value))))
       (Node. id ::distinct :multiset sub-chan)))
 
-  ;; TODO: initial
-  (defn make-reduce-by-key-node
-    [id [fn initial] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "reduce-by-key node" id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (if (.isEmpty (:value msg))
-                        (:value msg)
-                        (-> (:value msg)
-                            (f/reduce-by-key fn)))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::reduce-by-key :hash sub-chan)))
-
   ;; TODO: just use make-map-node
   (defn make-hash-to-multiset-node
     [id [] [input-node]]
@@ -483,85 +585,7 @@
             (recur (<! input) value))
           (do (send-subscribers @subscribers false value id)
               (recur (<! input) value))))
-      (Node. id ::map-by-key :hash sub-chan)))
-
-  ;; TODO: initial
-  (defn make-reduce-node
-    [id [f initial] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "reduce node" id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (if (.isEmpty (:value msg))
-                        (:value msg)
-                        (-> (:value msg)
-                            (f/reduce f)
-                            ((fn [e] (f/parallelize sc [e])))))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::reduce :multiset sub-chan)))
-
-  (gen-class
-    :name examples.FilterFunction
-    :implements [org.apache.spark.api.java.function.Function]
-    :state state
-    :init init
-    :constructors {[Object] []}
-    :prefix "filter-function-")
-
-  (defn filter-function-init
-    [pred]
-    [[] pred])
-
-  (defn filter-function-call ^Boolean
-  [this val]
-    (let [pred (.state this)]
-      (pred val)))
-
-  (defn make-filter-node
-    [id [pred] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)
-          pred (examples.FilterFunction. pred)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "filter node " id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (-> (:value msg)
-                          (.filter pred))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::filter :multiset sub-chan)))
-
-  ;; TODO: use serialisable function?
-  (defn make-filter-by-key-node
-    [id [pred] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)
-          filter-fn (fn/function (fn [^Tuple2 t] (pred (._2 t))))]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "filter-by-key node " id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (-> (:value msg)
-                          (.filter filter-fn))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::filter-by-key :hash sub-chan))))
+      (Node. id ::map-by-key :hash sub-chan))))
 
 (defn make-print-node
   [id [form] [input-node]]

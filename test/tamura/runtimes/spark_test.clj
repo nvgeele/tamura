@@ -1,14 +1,14 @@
 (ns tamura.runtimes.spark-test
   (:refer-clojure :exclude [send])
   (:use [midje.sweet :exclude [facts]]
-        tamura.datastructures)
+        tamura.datastructures
+        tamura.runtimes.spark-test-utils)
   (:require [clojure.core.async :as a :refer [>!! <!!]]
             [clj-time.core :as t]
             [multiset.core :as ms]
             [tamura.node :as n]
             [tamura.runtimes.spark :as spark]
             [tamura.util :refer [chan new-id!]]
-
             [midje.sweet]))
 
 (def ^:dynamic *source-id* nil)
@@ -173,13 +173,9 @@
 (facts "about delay"
   (facts "multiset"
     (test-multiset-node #(spark/make-delay-node (new-id!) [] [%])
-      (println "ok")
       (send-receive 1) => (ms/multiset)
-      (println "ok")
       (send-receive 2) => (ms/multiset 1)
-      (println "ok")
-      (send-receive 3) => (ms/multiset 1 2)
-      (println "ok")))
+      (send-receive 3) => (ms/multiset 1 2)))
   (facts "hash"
     (test-hash-node #(spark/make-delay-node (new-id!) [] [%])
       (send-receive :a 1) => {}
@@ -320,39 +316,38 @@
     (send-receive :b 2) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2)}
     (send-receive :b 3) => {:a (ms/multiset 1 2) :b (ms/multiset 1 2 3)}))
 
+(facts "about reduce, function (fn [a b] (+ a b))"
+  (facts "multiset (no initial)"
+    (test-multiset-node #(spark/make-reduce-node (new-id!) [reduce-fn false] [%])
+      (send-receive 1) => (ms/multiset 1)
+      (send-receive 2) => (ms/multiset 3)
+      (send-receive 3) => (ms/multiset 6)))
+  (comment (facts "multiset (initial = -1)"
+             (test-multiset-node #(spark/make-reduce-node (new-id!) [reduce-fn {:val -1}] [%])
+               (send-receive 1) => (ms/multiset 0)
+               (send-receive 2) => (ms/multiset 2)
+               (send-receive 3) => (ms/multiset 5)))))
+
+(facts "about reduce-by-key, function (fn [a b] (+ a b))"
+  (facts "hash (no initial)"
+    (test-hash-node #(spark/make-reduce-by-key-node (new-id!) [reduce-fn false] [%])
+      (send-receive :a 1) => {:a (ms/multiset 1)}
+      (send-receive :a 2) => {:a (ms/multiset 3)}
+      (send-receive :a 3) => {:a (ms/multiset 6)}
+      (send-receive :b 1) => {:a (ms/multiset 6) :b (ms/multiset 1)}
+      (send-receive :b 2) => {:a (ms/multiset 6) :b (ms/multiset 3)}))
+  (comment (facts "hash (initial = -1)"
+             (test-hash-node #(spark/make-reduce-by-key-node (new-id!) [reduce-fn {:val -1}] [%])
+               (send-receive :a 1) => {:a (ms/multiset 0)}
+               (send-receive :a 2) => {:a (ms/multiset 2)}
+               (send-receive :a 3) => {:a (ms/multiset 5)}
+               (send-receive :b 1) => {:a (ms/multiset 5) :b (ms/multiset 0)}
+               (send-receive :b 2) => {:a (ms/multiset 5) :b (ms/multiset 2)}))))
+
 (do-tests)
 
 (comment
 
-
-
-  (facts "about reduce, function (fn [a b] (+ a b))"
-    (facts "multiset (no initial)"
-      (test-multiset-node #(spark/make-reduce-node (new-id!) [(fn [a b] (+ a b)) false] [%])
-                          (send-receive 1) => (ms/multiset 1)
-                          (send-receive 2) => (ms/multiset 3)
-                          (send-receive 3) => (ms/multiset 6)))
-    (facts "multiset (initial = -1)"
-      (test-multiset-node #(spark/make-reduce-node (new-id!) [(fn [a b] (+ a b)) {:val -1}] [%])
-                          (send-receive 1) => (ms/multiset 0)
-                          (send-receive 2) => (ms/multiset 2)
-                          (send-receive 3) => (ms/multiset 5))))
-
-  (facts "about reduce-by-key, function (fn [a b] (+ a b))"
-    (facts "hash (no initial)"
-      (test-hash-node #(spark/make-reduce-by-key-node (new-id!) [(fn [a b] (+ a b)) false] [%])
-                      (send-receive :a 1) => {:a (ms/multiset 1)}
-                      (send-receive :a 2) => {:a (ms/multiset 3)}
-                      (send-receive :a 3) => {:a (ms/multiset 6)}
-                      (send-receive :b 1) => {:a (ms/multiset 6) :b (ms/multiset 1)}
-                      (send-receive :b 2) => {:a (ms/multiset 6) :b (ms/multiset 3)}))
-    (facts "hash (initial = -1)"
-      (test-hash-node #(spark/make-reduce-by-key-node (new-id!) [(fn [a b] (+ a b)) {:val -1}] [%])
-                      (send-receive :a 1) => {:a (ms/multiset 0)}
-                      (send-receive :a 2) => {:a (ms/multiset 2)}
-                      (send-receive :a 3) => {:a (ms/multiset 5)}
-                      (send-receive :b 1) => {:a (ms/multiset 5) :b (ms/multiset 0)}
-                      (send-receive :b 2) => {:a (ms/multiset 5) :b (ms/multiset 2)})))
 
   (facts "about hash-to-multiset"
     (test-hash-node #(spark/make-hash-to-multiset-node (new-id!) [] [%])
