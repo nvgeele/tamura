@@ -409,7 +409,11 @@
     (test-multiset-node #(spark/make-reduce-node (new-id!) [reduce-fn false] [%])
       (send-receive 1) => (ms/multiset 1)
       (send-receive 2) => (ms/multiset 3)
-      (send-receive 3) => (ms/multiset 6)))
+      (send-receive 3) => (ms/multiset 6)
+      (send-receive 3) => (ms/multiset 9)
+      (send-receive 3) => (ms/multiset 12)
+      (send-receive 10) => (ms/multiset 22)
+      (send-receive 10) => (ms/multiset 32)))
   (comment (facts "multiset (initial = -1)"
              (test-multiset-node #(spark/make-reduce-node (new-id!) [reduce-fn {:val -1}] [%])
                (send-receive 1) => (ms/multiset 0)
