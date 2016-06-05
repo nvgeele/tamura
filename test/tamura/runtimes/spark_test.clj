@@ -77,8 +77,8 @@
                     test-chan# (chan)
                     out-node# (init# source-node1# source-node2#)]
                 (n/node-subscribe out-node# test-chan#)
-                ;; 100 ms sleep to make sure nodes are subscribed and so on
-                (Thread/sleep 100)
+                ;; 200 ms sleep to make sure nodes are subscribed and so on
+                (Thread/sleep 200)
                 (binding [*source-id* source-id1#
                           *source-id2* source-id2#
                           *source-chan* (:in source-node1#)
