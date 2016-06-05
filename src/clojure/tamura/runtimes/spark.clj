@@ -526,6 +526,8 @@
     (make-node id nt/map-by-key :hash sub-chan)))
 (register-constructor! this-runtime nt/map-by-key make-map-by-key-node)
 
+;; TODO: can we make these operations 100% distributed?
+;; https://en.wikipedia.org/wiki/Multiset#Multiplicity_function
 (defn make-union-node
   [id [] inputs]
   (let [sub-chan (chan)
@@ -548,26 +550,29 @@
     (make-node id nt/union :multiset sub-chan)))
 (register-constructor! this-runtime nt/union make-union-node)
 
-(comment
-  (defn make-subtract-node
-    [id [] inputs]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          inputs (subscribe-inputs inputs)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msgs (map <!! inputs)
-                value (emptyRDD)]
-        (log/debug (str "subtract node " id " has received: " msgs))
-        (if (ormap :changed? msgs)
-          (let [value (f/subtract (:value (first msgs))
-                                  (:value (second msgs)))]
-            (send-subscribers @subscribers true value id)
-            (recur (map <!! inputs) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (map <!! inputs) value))))
-      (make-node id nt/subtract :multiset sub-chan)))
-  (register-constructor! this-runtime nt/subtract make-subtract-node)
+(defn make-subtract-node
+  [id [] inputs]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        inputs (subscribe-inputs inputs)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msgs (map <!! inputs)
+              value (emptyRDD)]
+      (log/debug (str "subtract node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [lmul (rdd-multiplicities (:value (first msgs)))
+              rmul (rdd-multiplicities (:value (second msgs)))
+              value (-> (multiset-subtract (multiplicities->multiset lmul)
+                                           (multiplicities->multiset rmul))
+                        (parallelize))]
+          (send-subscribers @subscribers true value id)
+          (recur (map <!! inputs) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (map <!! inputs) value))))
+    (make-node id nt/subtract :multiset sub-chan)))
+(register-constructor! this-runtime nt/subtract make-subtract-node)
 
+(comment
   ;; TODO: correct behaviour for MULTISETS
   (defn make-intersection-node
     [id [] inputs]
