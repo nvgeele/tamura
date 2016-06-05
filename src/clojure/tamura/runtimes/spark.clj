@@ -117,6 +117,20 @@
   [hash]
   (make-hash (collect-hash* hash)))
 
+(defn collect*
+  [type rdd]
+  (case type
+    :multiset (collect-multiset* rdd)
+    :hash (collect-hash* rdd)
+    :else (throw (Exception. "collect*: unsupported type"))))
+
+(defn collect
+  [type rdd]
+  (case type
+    :multiset (collect-multiset rdd)
+    :hash (collect-hash rdd)
+    :else (throw (Exception. "collect: unsupported type"))))
+
 ;;;; SPARK CLASSES AND FUNCTIONS ;;;;
 
 (f/defsparkfn spark-identity [x] x)
@@ -492,6 +506,20 @@
             (recur (<! input) rdd))))
     (make-node id nt/diff-remove :multiset sub-chan)))
 (register-constructor! this-runtime nt/diff-remove make-diff-remove-node)
+
+;; TODO: tests
+(defn make-do-apply-node
+  [id [action] input-nodes]
+  (let [inputs (subscribe-inputs input-nodes)
+        input-types (map :return-type input-nodes)]
+    (go-loop [msgs (map <!! inputs)]
+      (log/debug (str "do-apply node " id " has received: " (seq msgs)))
+      (when (ormap :changed? msgs)
+        (let [colls (map #(collect* %1 (:value %2)) input-types msgs)]
+          (apply action colls)))
+      (recur (map <!! inputs)))
+    (make-sink id nt/do-apply)))
+(register-constructor! this-runtime nt/do-apply make-do-apply-node)
 
 (defn make-print-node
   [id [form] [input-node]]
