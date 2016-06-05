@@ -372,7 +372,8 @@
   (test-hash-node #(cr/make-hash-to-multiset-node (new-id!) [] [%])
     (send-receive :a 1) => (ms/multiset [:a 1])
     (send-receive :b 1) => (ms/multiset [:a 1] [:b 1])
-    (send-receive :b 2) => (ms/multiset [:a 1] [:b 1] [:b 2])))
+    (send-receive :b 2) => (ms/multiset [:a 1] [:b 1] [:b 2])
+    (send-receive :b 2) => (ms/multiset [:a 1] [:b 1] [:b 2] [:b 2])))
 
 (facts "about map, function inc"
   (test-multiset-node #(cr/make-map-node (new-id!) [inc] [%])

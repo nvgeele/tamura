@@ -160,8 +160,10 @@
   1)
 
 (f/defsparkfn hash-to-multiset-map-fn
-  [t]
-  [(._1 t) (._2 t)])
+  [^Tuple2 grouped]
+  (let [el (._1 grouped)
+        ls (._2 grouped)]
+    (ft/tuple [(._1 el) (._2 el)] (count ls))))
 
 (gen-class
   :name tamura.runtimes.ReduceFunction
@@ -308,6 +310,11 @@
   [^JavaPairRDD rdd]
   (f/map-values rdd multiset-distinct-map-fn))
 
+(defn- hash-to-multiset-rdd
+  [^JavaPairRDD rdd]
+  (-> (f/group-by rdd spark-identity)
+      (f/map-to-pair hash-to-multiset-map-fn)))
+
 ;;;; PRIMITIVES ;;;;
 
 ;;;;           SOURCES           ;;;;
@@ -452,7 +459,9 @@
       (log/debug (str "diff-add node " id " has received: " msg))
       (if (:changed? msg)
         (let [inserted ((if hash? hash-inserted multiset-inserted) (:collection msg))
-              rdd (f/parallelize sc inserted)]
+              rdd (if (empty? inserted)
+                    (empty-pair-rdd)
+                    (parallelize-multiset* (apply ms/multiset inserted)))]
           (send-subscribers @subscribers true rdd id)
           (recur (<! input) rdd))
         (do (send-subscribers @subscribers false rdd id)
@@ -473,8 +482,10 @@
               rdd (empty-pair-rdd)]
       (log/debug (str "diff-remove node " id " has received: " msg))
       (if (:changed? msg)
-        (let [inserted ((if hash? hash-removed multiset-removed) (:collection msg))
-              rdd (f/parallelize sc inserted)]
+        (let [removed ((if hash? hash-removed multiset-removed) (:collection msg))
+              rdd (if (empty? removed)
+                    (empty-pair-rdd)
+                    (parallelize-multiset* (apply ms/multiset removed)))]
           (send-subscribers @subscribers true rdd id)
           (recur (<! input) rdd))
         (do (send-subscribers @subscribers false rdd id)
@@ -762,8 +773,7 @@
               value (empty-pair-rdd)]
       (log/debug (str "hash-to-multiset node" id " has received: " msg))
       (if (:changed? msg)
-        (let [value (-> (:value msg)
-                        (f/map hash-to-multiset-map-fn))]
+        (let [value (hash-to-multiset-rdd (:value msg))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
