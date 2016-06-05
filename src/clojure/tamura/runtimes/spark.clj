@@ -154,6 +154,12 @@
   (let [pred (.state this)]
     (pred val)))
 
+(defn- rdd-multiplicities
+  [rdd]
+  (if (.isEmpty rdd)
+    {}
+    (f/aggregate rdd {} multiplicities-seq-fn multiplicities-com-fn)))
+
 ;;;; PRIMITIVES ;;;;
 
 ;; TODO: capture the value of cfg/throttle? at construction?
@@ -335,11 +341,10 @@
       (log/debug (str "multiplicities node" id " has received: " msg))
       ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
       (if (:changed? msg)
-        (let [value (if (.isEmpty (:value msg))
+        (let [m (rdd-multiplicities (:value msg))
+              value (if (empty? m)
                       (:value msg)
-                      (-> (:value msg)
-                          (f/aggregate {} multiplicities-seq-fn multiplicities-com-fn)
-                          ((fn [m] (f/parallelize sc (vec m))))))]
+                      (f/parallelize sc (vec m)))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
