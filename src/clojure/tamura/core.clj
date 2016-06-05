@@ -68,6 +68,8 @@
   (core/reset! threads [])
   (>!! (:in *coordinator*) :reset))
 
+;;;;           SOURCES           ;;;;
+
 ;; TODO: redis sink
 ;; TODO: put coordinator in Node/Source record? *coordinator* is dynamic...
 ;; TODO: something something polling time
@@ -78,14 +80,7 @@
   (let [return-type (if key :hash :multiset)]
     (make-signal (register-source! nt/redis return-type [return-type host queue key buffer timeout]))))
 
-;; TODO: make this a sink
-(core/defn do-apply
-  [f arg & args]
-  (assert*
-    (andmap signal? (cons arg args)) "only signals from the second argument on")
-  (let [inputs (core/map signal-value (cons arg args))
-        node (register-node! nt/do-apply nil [f] inputs)]
-    (make-signal node)))
+;;;;  "POLYMORPHIC" OPERATIONS   ;;;;
 
 ;; TODO: constant set
 ;; TODO: combine-latest
@@ -98,45 +93,6 @@
   (let [input (signal-value arg)
         return-type (:return-type (get-node input))
         node (register-node! nt/delay return-type [] [input])]
-    (make-signal node)))
-
-(core/defn multiplicities
-  [arg]
-  (assert*
-    (signal? arg) "argument to multiplicities should be a signal"
-    (= (:return-type (get-node (signal-value arg))) :multiset) "input for multiplicities must be multiset")
-  (make-signal (register-node! nt/multiplicities :multiset [] [(signal-value arg)])))
-
-;; NOTE: Because multisets have no order, the function must be both commutative and associative
-;; TODO: reduce code duplication
-(core/defn reduce
-  ([source f]
-   (assert*
-     (signal? source) "argument to reduce should be a signal"
-     (= (:return-type (get-node (signal-value source))) :multiset) "input for reduce must be a multiset")
-   (make-signal (register-node! nt/reduce :multiset [f false] [(signal-value source)])))
-  ([source f val]
-   (assert*
-     (signal? source) "argument to reduce should be a signal"
-     (= (:return-type (get-node (signal-value source))) :multiset) "input for reduce must be a multiset")
-   (make-signal (register-node! nt/reduce :multiset [f {:val val}] [(signal-value source)]))))
-
-;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
-;; nodes depend on a throttle signal and one or more other signals.
-;; TODO: something something initialisation?
-;; TODO: what if the input hasn't changed next time we trigger? Do we still propagate a "change"?
-;; TODO: create trigger node when constructing?
-(core/defn throttle
-  [signal ms]
-  (assert*
-    (signal? signal) "first argument of throttle must be signal")
-  (let [trigger (register-source! nt/source :multiset [:multiset])
-        return-type (:return-type (get-node (signal-value signal)))
-        node (register-node! nt/throttle return-type [ms] [(signal-value signal) trigger])]
-    (threadloop []
-      (Thread/sleep ms)
-      (>!! (:in *coordinator*) {:destination trigger :value nil})
-      (recur))
     (make-signal node)))
 
 ;; TODO: corner case size 0
@@ -170,64 +126,32 @@
       "input for diff-remove node should be a source, buffer, or delay")
     (make-signal (register-node! nt/diff-remove (:return-type (get-node (signal-value sig))) [] [(signal-value sig)]))))
 
-;; TODO: make sure size > buffer size of buffer or source?
-(core/defn filter-key-size
-  [source size]
+;; TODO: make this a sink
+(core/defn do-apply
+  [f arg & args]
   (assert*
-    (signal? source) "argument to filter-key-size should be a signal"
-    (= (:return-type (get-node (signal-value source))) :hash) "input for filter-key-size must be a hash")
-  (make-signal (register-node! nt/filter-key-size :hash [size] [(signal-value source)])))
+    (andmap signal? (cons arg args)) "only signals from the second argument on")
+  (let [inputs (core/map signal-value (cons arg args))
+        node (register-node! nt/do-apply nil [f] inputs)]
+    (make-signal node)))
 
-;; NOTE: Because multisets have no order, the function must be both commutative and associative
-;; TODO: reduce code duplication
-(core/defn reduce-by-key
-  ([source f]
-   (assert*
-     (signal? source) "argument to reduce-by-key should be a signal"
-     (= (:return-type (get-node (signal-value source))) :hash) "input for reduce-by-key must be a hash")
-   (make-signal (register-node! nt/reduce-by-key :hash [f false] [(signal-value source)])))
-  ([source f val]
-   (assert*
-     (signal? source) "argument to reduce-by-key should be a signal"
-     (= (:return-type (get-node (signal-value source))) :hash) "input for reduce-by-key must be a hash")
-   (make-signal (register-node! nt/reduce-by-key :hash [f {:val val}] [(signal-value source)]))))
-
-(core/defn hash-to-multiset
-  [source]
+;; We *must* work with a node that signals the coordinator to ensure correct propagation in situations where
+;; nodes depend on a throttle signal and one or more other signals.
+;; TODO: something something initialisation?
+;; TODO: what if the input hasn't changed next time we trigger? Do we still propagate a "change"?
+;; TODO: create trigger node when constructing?
+(core/defn throttle
+  [signal ms]
   (assert*
-    (signal? source) "argument to hash-to-multiset should be a signal"
-    (= (:return-type (get-node (signal-value source))) :hash) "input for hash-to-multiset must be a hash")
-  (make-signal (register-node! nt/hash-to-multiset :multiset [] [(signal-value source)])))
-
-;; TODO: like reduce, make it work for regular collections too
-(core/defn map
-  [source f]
-  (assert*
-    (signal? source) "argument to map should be a signal"
-    (= (:return-type (get-node (signal-value source))) :multiset) "input for map must be a multiset")
-  (make-signal (register-node! nt/map :multiset [f] [(signal-value source)])))
-
-(core/defn map-by-key
-  [source f]
-  (assert*
-    (signal? source) "argument to map-by-key should be a signal"
-    (= (:return-type (get-node (signal-value source))) :multiset) "input for map-by-key must be a hash")
-  (make-signal (register-node! nt/map-by-key :hash [f] [(signal-value source)])))
-
-;; TODO: like reduce, make it work for regular collections too
-(core/defn filter
-  [source f]
-  (assert*
-    (signal? source) "argument to filter should be a signal"
-    (= (:return-type (get-node (signal-value source))) :multiset) "input for filter must be a multiset")
-  (make-signal (register-node! nt/filter :multiset [f] [(signal-value source)])))
-
-(core/defn filter-by-key
-  [source f]
-  (assert*
-    (signal? source) "argument to filter-by-key should be a signal"
-    (= (:return-type (get-node (signal-value source))) :hash) "input for filter-by-key must be a hash")
-  (make-signal (register-node! nt/filter-by-key :hash [f] [(signal-value source)])))
+    (signal? signal) "first argument of throttle must be signal")
+  (let [trigger (register-source! nt/source :multiset [:multiset])
+        return-type (:return-type (get-node (signal-value signal)))
+        node (register-node! nt/throttle return-type [ms] [(signal-value signal) trigger])]
+    (threadloop []
+      (Thread/sleep ms)
+      (>!! (:in *coordinator*) {:destination trigger :value nil})
+      (recur))
+    (make-signal node)))
 
 (defn- print*
   [signal form]
@@ -240,6 +164,45 @@
   ;; trick to capture the private make-signal and avoid violations
   (let [k print*]
     `(~k ~input-form (quote ~input-form))))
+
+;;;;     MULTISET OPERATIONS     ;;;;
+
+;; TODO: like reduce, make it work for regular collections too
+(core/defn map
+  [source f]
+  (assert*
+    (signal? source) "argument to map should be a signal"
+    (= (:return-type (get-node (signal-value source))) :multiset) "input for map must be a multiset")
+  (make-signal (register-node! nt/map :multiset [f] [(signal-value source)])))
+
+;; NOTE: Because multisets have no order, the function must be both commutative and associative
+;; TODO: reduce code duplication
+(core/defn reduce
+  ([source f]
+   (assert*
+     (signal? source) "argument to reduce should be a signal"
+     (= (:return-type (get-node (signal-value source))) :multiset) "input for reduce must be a multiset")
+   (make-signal (register-node! nt/reduce :multiset [f false] [(signal-value source)])))
+  ([source f val]
+   (assert*
+     (signal? source) "argument to reduce should be a signal"
+     (= (:return-type (get-node (signal-value source))) :multiset) "input for reduce must be a multiset")
+   (make-signal (register-node! nt/reduce :multiset [f {:val val}] [(signal-value source)]))))
+
+;; TODO: like reduce, make it work for regular collections too
+(core/defn filter
+  [source f]
+  (assert*
+    (signal? source) "argument to filter should be a signal"
+    (= (:return-type (get-node (signal-value source))) :multiset) "input for filter must be a multiset")
+  (make-signal (register-node! nt/filter :multiset [f] [(signal-value source)])))
+
+(core/defn multiplicities
+  [arg]
+  (assert*
+    (signal? arg) "argument to multiplicities should be a signal"
+    (= (:return-type (get-node (signal-value arg))) :multiset) "input for multiplicities must be multiset")
+  (make-signal (register-node! nt/multiplicities :multiset [] [(signal-value arg)])))
 
 (core/defn union
   [left right]
@@ -274,6 +237,51 @@
     (signal? input) "argument to distinct must be signal"
     (= (:return-type (get-node (signal-value input))) :multiset) "argument to distinct must be multiset")
   (make-signal (register-node! nt/distinct :multiset [] [(signal-value input)])))
+
+;;;;       HASH OPERATIONS       ;;;;
+
+(core/defn map-by-key
+  [source f]
+  (assert*
+    (signal? source) "argument to map-by-key should be a signal"
+    (= (:return-type (get-node (signal-value source))) :multiset) "input for map-by-key must be a hash")
+  (make-signal (register-node! nt/map-by-key :hash [f] [(signal-value source)])))
+
+;; NOTE: Because multisets have no order, the function must be both commutative and associative
+;; TODO: reduce code duplication
+(core/defn reduce-by-key
+  ([source f]
+   (assert*
+     (signal? source) "argument to reduce-by-key should be a signal"
+     (= (:return-type (get-node (signal-value source))) :hash) "input for reduce-by-key must be a hash")
+   (make-signal (register-node! nt/reduce-by-key :hash [f false] [(signal-value source)])))
+  ([source f val]
+   (assert*
+     (signal? source) "argument to reduce-by-key should be a signal"
+     (= (:return-type (get-node (signal-value source))) :hash) "input for reduce-by-key must be a hash")
+   (make-signal (register-node! nt/reduce-by-key :hash [f {:val val}] [(signal-value source)]))))
+
+(core/defn filter-by-key
+  [source f]
+  (assert*
+    (signal? source) "argument to filter-by-key should be a signal"
+    (= (:return-type (get-node (signal-value source))) :hash) "input for filter-by-key must be a hash")
+  (make-signal (register-node! nt/filter-by-key :hash [f] [(signal-value source)])))
+
+;; TODO: make sure size > buffer size of buffer or source?
+(core/defn filter-key-size
+  [source size]
+  (assert*
+    (signal? source) "argument to filter-key-size should be a signal"
+    (= (:return-type (get-node (signal-value source))) :hash) "input for filter-key-size must be a hash")
+  (make-signal (register-node! nt/filter-key-size :hash [size] [(signal-value source)])))
+
+(core/defn hash-to-multiset
+  [source]
+  (assert*
+    (signal? source) "argument to hash-to-multiset should be a signal"
+    (= (:return-type (get-node (signal-value source))) :hash) "input for hash-to-multiset must be a hash")
+  (make-signal (register-node! nt/hash-to-multiset :multiset [] [(signal-value source)])))
 
 (core/defn -main
   [& args]

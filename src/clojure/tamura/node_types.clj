@@ -14,32 +14,36 @@
        (doseq [ancestor# [~@ancestors]]
          (derive ~tkwd ancestor#)))))
 
+;;;;           SOURCES           ;;;;
+
 (defnode-type source)
 (defnode-type redis source)
+
+;;;;  "POLYMORPHIC" OPERATIONS   ;;;;
 
 (defnode-type delay)
 (defnode-type buffer)
 (defnode-type diff-add)
 (defnode-type diff-remove)
+(defnode-type do-apply)
+(defnode-type throttle)
+(defnode-type print)
 
-(defnode-type reduce)
-(defnode-type reduce-by-key)
+;;;;     MULTISET OPERATIONS     ;;;;
 
 (defnode-type map)
-(defnode-type map-by-key)
-
+(defnode-type reduce)
 (defnode-type filter)
-(defnode-type filter-by-key)
-(defnode-type filter-key-size)
-
-(defnode-type hash-to-multiset)
 (defnode-type multiplicities)
-
 (defnode-type union)
 (defnode-type subtract)
 (defnode-type intersection)
 (defnode-type distinct)
 
-(defnode-type do-apply)
-(defnode-type throttle)
-(defnode-type print)
+;;;;       HASH OPERATIONS       ;;;;
+
+(defnode-type map-by-key)
+(defnode-type reduce-by-key)
+(defnode-type filter-by-key)
+(defnode-type filter-key-size)
+(defnode-type hash-to-multiset)

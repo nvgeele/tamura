@@ -162,6 +162,8 @@
 
 ;;;; PRIMITIVES ;;;;
 
+;;;;           SOURCES           ;;;;
+
 ;; TODO: capture the value of cfg/throttle? at construction?
 (defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
@@ -236,6 +238,8 @@
         (recur)))
     source-node))
 (register-constructor! this-runtime nt/redis make-redis-node)
+
+;;;;  "POLYMORPHIC" OPERATIONS   ;;;;
 
 (defn make-delay-node
   [id [] [input-node]]
@@ -330,49 +334,47 @@
     (make-node id nt/diff-remove :multiset sub-chan)))
 (register-constructor! this-runtime nt/diff-remove make-diff-remove-node)
 
-(defn make-multiplicities-node
-  [id [] [input-node]]
+(defn make-print-node
+  [id [form] [input-node]]
+  (let [input (subscribe-input input-node)
+        collector (if (= (:return-type input-node) :hash)
+                    collect-hash
+                    collect-multiset)]
+    (go-loop [msg (<! input)]
+      (log/debug (str "print node " id " has received: " msg))
+      (when (:changed? msg)
+        (let [s (with-out-str (-> (:value msg)
+                                  (collector)
+                                  (pprint)))]
+          (locking print-lock
+            (print (str form ": " s))
+            (flush))))
+      (recur (<! input)))
+    (make-sink id nt/print)))
+(register-constructor! this-runtime nt/print make-print-node)
+
+;;;;     MULTISET OPERATIONS     ;;;;
+
+;; TODO: Test if all works for empty RDDs
+;; TODO: Serializable function
+(defn make-map-node
+  [id [f] [input-node]]
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (emptyRDD)]
-      (log/debug (str "multiplicities node" id " has received: " msg))
-      ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
-      (if (:changed? msg)
-        (let [m (rdd-multiplicities (:value msg))
-              value (if (empty? m)
-                      (:value msg)
-                      (f/parallelize sc (vec m)))]
-          (send-subscribers @subscribers true value id)
-          (recur (<! input) value))
-        (do (send-subscribers @subscribers false value id)
-            (recur (<! input) value))))
-    (make-node id nt/multiplicities :multiset sub-chan)))
-(register-constructor! this-runtime nt/multiplicities make-multiplicities-node)
-
-(defn make-filter-key-size-node
-  [id [size] [input-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)
-        filter-fn (tamura.runtimes.FilterKeySizeFunction. size)]
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<! input)
-              value (emptyRDD)]
-      (log/debug (str "filter-key-size node" id " has received: " msg))
+      (log/debug (str "map node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
-                        (f/group-by-key)
-                        (.filter filter-fn)
-                        (f/flat-map-values spark-identity))]
+                        (f/map f))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (make-node id nt/filter-key-size :hash sub-chan)))
-(register-constructor! this-runtime nt/filter-key-size make-filter-key-size-node)
+    (make-node id nt/map :multiset sub-chan)))
+(register-constructor! this-runtime nt/map make-map-node)
 
 ;; TODO: initial
 ;; TODO: wrap function
@@ -399,50 +401,6 @@
     (make-node id nt/reduce :multiset sub-chan)))
 (register-constructor! this-runtime nt/reduce make-reduce-node)
 
-;; TODO: initial
-;; TODO: wrap function
-(defn make-reduce-by-key-node
-  [id [fn initial] [input-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)
-        reduce-fn (tamura.runtimes.ReduceFunction. fn)]
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<! input)
-              value (emptyRDD)]
-      (log/debug (str "reduce-by-key node" id " has received: " msg))
-      (if (:changed? msg)
-        (let [value (if (.isEmpty (:value msg))
-                      (:value msg)
-                      (-> (:value msg)
-                          (.reduceByKey reduce-fn)))]
-          (send-subscribers @subscribers true value id)
-          (recur (<! input) value))
-        (do (send-subscribers @subscribers false value id)
-            (recur (<! input) value))))
-    (make-node id nt/reduce-by-key :hash sub-chan)))
-(register-constructor! this-runtime nt/reduce-by-key make-reduce-by-key-node)
-
-;; TODO: just use make-map-node?
-(defn make-hash-to-multiset-node
-  [id [] [input-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)]
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<! input)
-              value (emptyRDD)]
-      (log/debug (str "hash-to-multiset node" id " has received: " msg))
-      (if (:changed? msg)
-        (let [value (-> (:value msg)
-                        (f/map hash-to-multiset-map-fn))]
-          (send-subscribers @subscribers true value id)
-          (recur (<! input) value))
-        (do (send-subscribers @subscribers false value id)
-            (recur (<! input) value))))
-    (make-node id nt/hash-to-multiset :multiset sub-chan)))
-(register-constructor! this-runtime nt/hash-to-multiset make-hash-to-multiset-node)
-
 (defn make-filter-node
   [id [pred] [input-node]]
   (let [sub-chan (chan)
@@ -463,68 +421,27 @@
     (make-node id nt/filter :multiset sub-chan)))
 (register-constructor! this-runtime nt/filter make-filter-node)
 
-;; TODO: use serialisable function?
-(defn make-filter-by-key-node
-  [id [pred] [input-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)
-        filter-fn (fn/function (fn [^Tuple2 t] (pred (._2 t))))]
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<! input)
-              value (emptyRDD)]
-      (log/debug (str "filter-by-key node " id " has received: " msg))
-      (if (:changed? msg)
-        (let [value (-> (:value msg)
-                        (.filter filter-fn))]
-          (send-subscribers @subscribers true value id)
-          (recur (<! input) value))
-        (do (send-subscribers @subscribers false value id)
-            (recur (<! input) value))))
-    (make-node id nt/filter-by-key :hash sub-chan)))
-(register-constructor! this-runtime nt/filter-by-key make-filter-by-key-node)
-
-;; TODO: Test if all works for empty RDDs
-;; TODO: Serializable function
-(defn make-map-node
-  [id [f] [input-node]]
+(defn make-multiplicities-node
+  [id [] [input-node]]
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (emptyRDD)]
-      (log/debug (str "map node" id " has received: " msg))
+      (log/debug (str "multiplicities node" id " has received: " msg))
+      ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
       (if (:changed? msg)
-        (let [value (-> (:value msg)
-                        (f/map f))]
+        (let [m (rdd-multiplicities (:value msg))
+              value (if (empty? m)
+                      (:value msg)
+                      (f/parallelize sc (vec m)))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
             (recur (<! input) value))))
-    (make-node id nt/map :multiset sub-chan)))
-(register-constructor! this-runtime nt/map make-map-node)
-
-;; TODO: Test if all works for empty RDDs
-;; TODO: Serializable function
-(defn make-map-by-key-node
-  [id [f] [input-node]]
-  (let [sub-chan (chan)
-        subscribers (atom [])
-        input (subscribe-input input-node)]
-    (subscriber-loop id sub-chan subscribers)
-    (go-loop [msg (<! input)
-              value (emptyRDD)]
-      (log/debug (str "map-by-key node" id " has received: " msg))
-      (if (:changed? msg)
-        (let [value (-> (:value msg)
-                        (f/map-values f))]
-          (send-subscribers @subscribers true value id)
-          (recur (<! input) value))
-        (do (send-subscribers @subscribers false value id)
-            (recur (<! input) value))))
-    (make-node id nt/map-by-key :hash sub-chan)))
-(register-constructor! this-runtime nt/map-by-key make-map-by-key-node)
+    (make-node id nt/multiplicities :multiset sub-chan)))
+(register-constructor! this-runtime nt/multiplicities make-multiplicities-node)
 
 ;; TODO: can we make these operations 100% distributed?
 ;; https://en.wikipedia.org/wiki/Multiset#Multiplicity_function
@@ -612,21 +529,112 @@
     (make-node id nt/distinct :multiset sub-chan)))
 (register-constructor! this-runtime nt/distinct make-distinct-node)
 
-(defn make-print-node
-  [id [form] [input-node]]
-  (let [input (subscribe-input input-node)
-        collector (if (= (:return-type input-node) :hash)
-                    collect-hash
-                    collect-multiset)]
-    (go-loop [msg (<! input)]
-      (log/debug (str "print node " id " has received: " msg))
-      (when (:changed? msg)
-        (let [s (with-out-str (-> (:value msg)
-                                  (collector)
-                                  (pprint)))]
-          (locking print-lock
-            (print (str form ": " s))
-            (flush))))
-      (recur (<! input)))
-    (make-sink id nt/print)))
-(register-constructor! this-runtime nt/print make-print-node)
+;;;;       HASH OPERATIONS       ;;;;
+
+;; TODO: Test if all works for empty RDDs
+;; TODO: Serializable function
+(defn make-map-by-key-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "map-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map-values f))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/map-by-key :hash sub-chan)))
+(register-constructor! this-runtime nt/map-by-key make-map-by-key-node)
+
+;; TODO: initial
+;; TODO: wrap function
+(defn make-reduce-by-key-node
+  [id [fn initial] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        reduce-fn (tamura.runtimes.ReduceFunction. fn)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "reduce-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (if (.isEmpty (:value msg))
+                      (:value msg)
+                      (-> (:value msg)
+                          (.reduceByKey reduce-fn)))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/reduce-by-key :hash sub-chan)))
+(register-constructor! this-runtime nt/reduce-by-key make-reduce-by-key-node)
+
+;; TODO: use serialisable function?
+(defn make-filter-by-key-node
+  [id [pred] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        filter-fn (fn/function (fn [^Tuple2 t] (pred (._2 t))))]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "filter-by-key node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (.filter filter-fn))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/filter-by-key :hash sub-chan)))
+(register-constructor! this-runtime nt/filter-by-key make-filter-by-key-node)
+
+(defn make-filter-key-size-node
+  [id [size] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)
+        filter-fn (tamura.runtimes.FilterKeySizeFunction. size)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "filter-key-size node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/group-by-key)
+                        (.filter filter-fn)
+                        (f/flat-map-values spark-identity))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/filter-key-size :hash sub-chan)))
+(register-constructor! this-runtime nt/filter-key-size make-filter-key-size-node)
+
+;; TODO: just use make-map-node?
+(defn make-hash-to-multiset-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "hash-to-multiset node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map hash-to-multiset-map-fn))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/hash-to-multiset :multiset sub-chan)))
+(register-constructor! this-runtime nt/hash-to-multiset make-hash-to-multiset-node)
