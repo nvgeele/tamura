@@ -39,14 +39,14 @@
       (Thread/sleep t)
       (>!! (:in *coordinator*) :heartbeat)
       (recur)))
-  (swap! threads #(doall (for [t %]
-                           (let [thread (Thread. (:body t))]
-                             (.start thread)
-                             (assoc t :thread thread)))))
   ;; TODO: remove sleep?
   ;; NOTE: we wait one second to ensure all nodes had time to subscribe
   (Thread/sleep 1000)
-  (>!! (:in *coordinator*) :start))
+  (>!! (:in *coordinator*) :start)
+  (swap! threads #(doall (for [t %]
+                           (let [thread (Thread. (:body t))]
+                             (.start thread)
+                             (assoc t :thread thread))))))
 
 ;; TODO: way to kill goroutines (or can we rely on garbage collection?)
 (core/defn stop!
