@@ -129,25 +129,6 @@
   [(._1 t) (._2 t)])
 
 (gen-class
-  :name tamura.runtimes.FilterKeySizeFunction
-  :implements [org.apache.spark.api.java.function.Function]
-  :state state
-  :init init
-  :constructors {[Number] []}
-  :prefix "filter-key-size-function-")
-
-(defn filter-key-size-function-init
-  [size]
-  [[] size])
-
-(defn filter-key-size-function-call
-  [^tamura.runtimes.FilterKeySizeFunction this
-   ^Tuple2 val]
-  (let [size (.state this)
-        vals (._2 val)]
-    (>= (count vals) size)))
-
-(gen-class
   :name tamura.runtimes.ReduceFunction
   :implements [org.apache.spark.api.java.function.Function2]
   :state state
@@ -176,16 +157,30 @@
   [pred]
   [[] pred])
 
-(defn filter-function-call ^Boolean
-[^tamura.runtimes.FilterFunction this val]
+(defn filter-function-call
+  ^Boolean [^tamura.runtimes.FilterFunction this val]
   (let [pred (.state this)]
     (pred val)))
 
-(defn- rdd-multiplicities
-  [rdd]
-  (if (.isEmpty rdd)
-    {}
-    (f/aggregate rdd {} multiplicities-seq-fn multiplicities-com-fn)))
+(gen-class
+  :name tamura.runtimes.FilterKeySizeFunction
+  :implements [org.apache.spark.api.java.function.Function]
+  :state state
+  :init init
+  :constructors {[Number] []}
+  :prefix "filter-key-size-function-")
+
+(defn filter-key-size-function-init
+  [size]
+  [[] size])
+
+(defn filter-key-size-function-call
+  ^Boolean
+  [^tamura.runtimes.FilterKeySizeFunction this
+   ^Tuple2 val]
+  (let [size (.state this)
+        vals (._2 val)]
+    (>= (count vals) size)))
 
 (gen-class
   :name tamura.runtimes.MultisetMapFunction
