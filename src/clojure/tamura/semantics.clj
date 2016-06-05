@@ -241,10 +241,12 @@
 
 (comment "Semantics for subtract"
   "multiset"
-  #{} #{}     => #{}
-  #{1} #{}    => #{1}
-  #{1} #{2}   => #{1}
-  #{1} #{2 1} => #{})
+  #{} #{}       => #{}
+  #{1} #{}      => #{1}
+  #{1} #{2}     => #{1}
+  #{1} #{2 1}   => #{}
+  ;#{1 1} #{2 1} => #{1}
+  )
 
 (comment "Semantics for intersection"
   "multiset"
