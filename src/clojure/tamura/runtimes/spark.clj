@@ -572,42 +572,45 @@
     (make-node id nt/subtract :multiset sub-chan)))
 (register-constructor! this-runtime nt/subtract make-subtract-node)
 
-(comment
-  ;; TODO: correct behaviour for MULTISETS
-  (defn make-intersection-node
-    [id [] inputs]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          inputs (subscribe-inputs inputs)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msgs (map <!! inputs)
-                value (emptyRDD)]
-        (log/debug (str "intersection node " id " has received: " msgs))
-        (if (ormap :changed? msgs)
-          (let [value (.intersection (:value (first msgs))
-                                     (:value (second msgs)))]
-            (send-subscribers @subscribers true value id)
-            (recur (map <!! inputs) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (map <!! inputs) value))))
-      (Node. id ::intersection :multiset sub-chan)))
+(defn make-intersection-node
+  [id [] inputs]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        inputs (subscribe-inputs inputs)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msgs (map <!! inputs)
+              value (emptyRDD)]
+      (log/debug (str "intersection node " id " has received: " msgs))
+      (if (ormap :changed? msgs)
+        (let [lmul (rdd-multiplicities (:value (first msgs)))
+              rmul (rdd-multiplicities (:value (second msgs)))
+              value (-> (multiset-intersection (multiplicities->multiset lmul)
+                                               (multiplicities->multiset rmul))
+                        (parallelize))]
+          (send-subscribers @subscribers true value id)
+          (recur (map <!! inputs) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (map <!! inputs) value))))
+    (make-node id nt/intersection :multiset sub-chan)))
+(register-constructor! this-runtime nt/intersection make-intersection-node)
 
-  (defn make-distinct-node
-    [id [] [input]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "distinct node " id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (f/distinct (:value msg))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::distinct :multiset sub-chan))))
+(defn make-distinct-node
+  [id [] [input]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "distinct node " id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (f/distinct (:value msg))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/distinct :multiset sub-chan)))
+(register-constructor! this-runtime nt/distinct make-distinct-node)
 
 (defn make-print-node
   [id [form] [input-node]]
