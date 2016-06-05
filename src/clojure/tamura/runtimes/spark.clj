@@ -136,6 +136,18 @@
     (ft/tuple el (max (.or left-m 0)
                       (.or right-m 0)))))
 
+(f/defsparkfn multiset-subtract-map-fn
+  [^Tuple2 tup]
+  (let [el (._1 tup)
+        left-m (._1 (._2 tup))
+        right-m (._2 (._2 tup))]
+    (ft/tuple el (max 0 (- left-m (.or right-m 0))))))
+
+(f/defsparkfn multiset-subtract-filter-fn
+  ^Boolean
+  [^Tuple2 tup]
+  (> (._2 tup) 0))
+
 (f/defsparkfn hash-to-multiset-map-fn
   [t]
   [(._1 t) (._2 t)])
@@ -267,9 +279,22 @@
   (-> (.fullOuterJoin left right)
       (f/map-to-pair multiset-union-map-fn)))
 
+(defn- multiset-subtract-rdd
+  [^JavaPairRDD left
+   ^JavaPairRDD right]
+  (-> (.leftOuterJoin left right)
+      (f/map-to-pair multiset-subtract-map-fn)
+      (f/filter multiset-subtract-filter-fn)))
+
 (comment
   "For union, we need to only do map.
-   For intersect and subtract we will probably need to filter first")
+   For intersect and subtract we will probably need to filter first
+
+   How subtract works in multiset:
+   first, we take the keys/elements from the left set,
+   then for each of this element, we do (max 0 (- left_mul right_mul))
+
+   ")
 
 ;;;; PRIMITIVES ;;;;
 
@@ -578,11 +603,8 @@
               value (empty-pair-rdd)]
       (log/debug (str "subtract node " id " has received: " msgs))
       (if (ormap :changed? msgs)
-        (let [lmul (multiset-multiplicities-rdd (:value (first msgs)))
-              rmul (multiset-multiplicities-rdd (:value (second msgs)))
-              value (-> (multiset-subtract (multiplicities->multiset lmul)
-                                           (multiplicities->multiset rmul))
-                        (parallelize))]
+        (let [value (multiset-subtract-rdd (:value (first msgs))
+                                           (:value (second msgs)))]
           (send-subscribers @subscribers true value id)
           (recur (map <!! inputs) value))
         (do (send-subscribers @subscribers false value id)
