@@ -820,35 +820,36 @@
 (defn -main
   [& args]
 
-  (setup-spark! {:app-name "sparky"
-                 :master   "local[*]"})
+  (comment
+    (setup-spark! {:app-name "sparky"
+                   :master   "local[*]"}))
 
-  (comment)
-  (let [r (redis "localhost" "q1")
-        ;f1 (filter* r even?)
-        ;f2 (filter* r odd?)
-        f1 (filter* r #(= (mod % 5) 0))
-        f2 (filter* r #(= (mod % 3) 0))
-        ;f1 (filter* r (f/fn [n] (= (mod n 5) 0)))
-        ;f2 (filter* r (f/fn [n] (= (mod n 3) 0)))
-        u (union f1 f2)
-        ;i (intersection f1 f2)
-        ;s1 (subtract f1 f2)
-        ;s2 (subtract f2 f1)
-        d (distinct* u)
-        ]
-    (print* r)
-    (print* f1)
-    (print* f2)
-    ;(print* u)
-    ;(print* i)
-    ;(print* s1)
-    ;(print* s2)
-    (print* d)
+  (comment
+    (let [r (redis "localhost" "q1")
+          ;f1 (filter* r even?)
+          ;f2 (filter* r odd?)
+          f1 (filter* r #(= (mod % 5) 0))
+          f2 (filter* r #(= (mod % 3) 0))
+          ;f1 (filter* r (f/fn [n] (= (mod n 5) 0)))
+          ;f2 (filter* r (f/fn [n] (= (mod n 3) 0)))
+          u (union f1 f2)
+          ;i (intersection f1 f2)
+          ;s1 (subtract f1 f2)
+          ;s2 (subtract f2 f1)
+          d (distinct* u)
+          ]
+      (print* r)
+      (print* f1)
+      (print* f2)
+      ;(print* u)
+      ;(print* i)
+      ;(print* s1)
+      ;(print* s2)
+      (print* d)
 
-    ;(set-throttle! 1000)
-    (start!)
-    (println "Let's go"))
+      ;(set-throttle! 1000)
+      (start!)
+      (println "Let's go")))
 
   (comment
     (let [l (redis "localhost" "q1" :buffer 2)

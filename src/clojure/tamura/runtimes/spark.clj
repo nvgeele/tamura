@@ -401,6 +401,26 @@
     (make-node id nt/reduce-by-key :hash sub-chan)))
 (register-constructor! this-runtime nt/reduce-by-key make-reduce-by-key-node)
 
+;; TODO: just use make-map-node?
+(defn make-hash-to-multiset-node
+  [id [] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "hash-to-multiset node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map hash-to-multiset-map-fn))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/hash-to-multiset :multiset sub-chan)))
+(register-constructor! this-runtime nt/hash-to-multiset make-hash-to-multiset-node)
+
 (comment
   (gen-class
     :name examples.FilterFunction
@@ -529,25 +549,6 @@
           (do (send-subscribers @subscribers false value id)
               (recur (<! input) value))))
       (Node. id ::distinct :multiset sub-chan)))
-
-  ;; TODO: just use make-map-node
-  (defn make-hash-to-multiset-node
-    [id [] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "hash-to-multiset node" id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (-> (:value msg)
-                          (f/map hash-to-multiset-map-fn))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::hash-to-multiset :multiset sub-chan)))
 
   ;; TODO: Test if all works for empty RDDs
   (defn make-map-node
