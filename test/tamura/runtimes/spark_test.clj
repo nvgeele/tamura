@@ -420,13 +420,13 @@
                (send-receive 2) => (ms/multiset 2)
                (send-receive 3) => (ms/multiset 5)))))
 
-(comment
-  (facts "about filter, function even?"
-    (test-multiset-node #(spark/make-filter-node (new-id!) [even?] [%])
-      (send-receive 1) => (ms/multiset)
-      (send-receive 2) => (ms/multiset 2)
-      (send-receive 3) => (ms/multiset 2)))
+(facts "about filter, function even?"
+  (test-multiset-node #(spark/make-filter-node (new-id!) [even?] [%])
+    (send-receive 1) => (ms/multiset)
+    (send-receive 2) => (ms/multiset 2)
+    (send-receive 3) => (ms/multiset 2)))
 
+(comment
   (facts "about make-multiplicities-node"
     (test-multiset-node #(spark/make-multiplicities-node (new-id!) [] [%])
       (send-receive 'a) => (ms/multiset ['a 1])

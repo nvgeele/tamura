@@ -146,21 +146,24 @@
     (f lval rval)))
 
 (gen-class
-  :name tamura.runtimes.FilterFunction
+  :name tamura.runtimes.MultisetFilterFunction
   :implements [org.apache.spark.api.java.function.Function]
   :state state
   :init init
   :constructors {[Object] []}
-  :prefix "filter-function-")
+  :prefix "multiset-filter-function-")
 
-(defn filter-function-init
+(defn multiset-filter-function-init
   [pred]
   [[] pred])
 
-(defn filter-function-call
-  ^Boolean [^tamura.runtimes.FilterFunction this val]
-  (let [pred (.state this)]
-    (pred val)))
+(defn multiset-filter-function-call
+  ^Boolean
+  [^tamura.runtimes.MultisetFilterFunction this
+   ^Tuple2 val]
+  (let [pred (.state this)
+        el (._1 val)]
+    (pred el)))
 
 (gen-class
   :name tamura.runtimes.FilterKeySizeFunction
@@ -236,6 +239,11 @@
     rdd
     (-> (.reduce rdd reduce-fn)
         ((fn [e] (f/parallelize sc [e]))))))
+
+(defn- multiset-filter-rdd
+  [^tamura.runtimes.MultisetFilterFunction filter-fn
+   ^JavaPairRDD rdd]
+  (.filter rdd filter-fn))
 
 (defn- rdd-multiplicities
   [rdd]
@@ -486,14 +494,13 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
-        pred (tamura.runtimes.FilterFunction. pred)]
+        filter-fn (tamura.runtimes.MultisetFilterFunction. pred)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (emptyRDD)]
       (log/debug (str "filter node " id " has received: " msg))
       (if (:changed? msg)
-        (let [value (-> (:value msg)
-                        (.filter pred))]
+        (let [value (multiset-filter-rdd filter-fn (:value msg))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
