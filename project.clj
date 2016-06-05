@@ -45,6 +45,7 @@
                     tamura.runtimes.spark-test-utils
                     examples.sparkruntime
                     examples.bxl-direct-spark
+                    examples.bxl-bench
                     ;tamura.runtimes.spark-test
                     ]}
              :uberjar

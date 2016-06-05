@@ -30,17 +30,18 @@
 
 (def ^{:private true} this-runtime :spark)
 
-(declare ^:private ^JavaSparkContext sc)
+(def ^:private ^JavaSparkContext sc nil)
 
 (defn setup-spark!
   []
-  (alter-var-root
-    (var sc)
-    (fn [& args]
-      (-> (conf/spark-conf)
-          (conf/app-name (cfg/spark-app-name))
-          (conf/master (cfg/spark-master))
-          (f/spark-context)))))
+  (when-not sc
+    (alter-var-root
+      (var sc)
+      (fn [& args]
+        (-> (conf/spark-conf)
+            (conf/app-name (cfg/spark-app-name))
+            (conf/master (cfg/spark-master))
+            (f/spark-context))))))
 
 ;;;; HELPERS ;;;;
 
