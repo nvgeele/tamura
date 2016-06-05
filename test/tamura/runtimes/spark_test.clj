@@ -432,7 +432,6 @@
 
 (facts "about subtract"
   (test-binode :multiset #(spark/make-subtract-node (new-id!) [] [%1 %2])
-    (println "subtract")
     (bi-send-receive 1 1) => (ms/multiset 1)
     (bi-send-receive 2 2) => (ms/multiset 1)
     (bi-send-receive 1 2) => (ms/multiset)
