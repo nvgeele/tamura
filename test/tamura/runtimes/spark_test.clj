@@ -18,6 +18,9 @@
 (def ^:dynamic *return-type* nil)
 (def ^:dynamic *current-test* nil)
 
+(def ^:dynamic *source-id2* nil)
+(def ^:dynamic *source-chan2* nil)
+
 (def test-fns (atom []))
 
 (defmacro facts
@@ -58,6 +61,35 @@
                   ~@body))
               (println (str \u001b "[32mdone" \u001b "[0m"))))))
 
+;; I know this approach is a bit messy...
+(defmacro test-binode
+  [input-type node-init & body]
+  `(let [ct# *current-test*]
+     (swap! test-fns
+            conj
+            (fn []
+              (print (str \u001b "[32m" ct# " ... " \u001b "[0m")) (flush)
+              (let [source-id1# (new-id!)
+                    source-id2# (new-id!)
+                    source-node1# (spark/make-source-node source-id1# [~input-type] [])
+                    source-node2# (spark/make-source-node source-id2# [~input-type] [])
+                    init# ~node-init
+                    test-chan# (chan)
+                    out-node# (init# source-node1# source-node2#)]
+                (n/node-subscribe out-node# test-chan#)
+                ;; 100 ms sleep to make sure nodes are subscribed and so on
+                (Thread/sleep 100)
+                (binding [*source-id* source-id1#
+                          *source-id2* source-id2#
+                          *source-chan* (:in source-node1#)
+                          *source-chan2* (:in source-node2#)
+                          *test-chan* test-chan#
+                          *input-type* ~input-type
+                          *return-type* (:return-type out-node#)]
+                  ~@body))
+              (println (str \u001b "[32mdone" \u001b "[0m"))
+              ))))
+
 (defmacro test-multiset-node
   [node-init & body]
   `(test-node :multiset false false ~node-init ~@body))
@@ -93,6 +125,22 @@
    (receive))
   ([key val]
    (send-receive [key val])))
+
+(defn bi-send
+  [value source]
+  (let [msg {:destination (if (= source 1)
+                            *source-id*
+                            *source-id2*)
+             :value value}]
+    (>!! *source-chan* msg)
+    (>!! *source-chan2* msg)))
+
+(defn bi-send-receive
+  ([value source]
+   (bi-send value source)
+   (receive))
+  ([key val source]
+   (bi-send-receive [key val] source)))
 
 ;; TODO: capture test metadata
 ;; TODO: set-up spark
@@ -375,22 +423,20 @@
     (send-receive :b 1) => {:a (ms/multiset 2) :b (ms/multiset 2)}
     (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2 3)}))
 
-(comment
-  (facts "about union"
-    (test-binode :multiset #(spark/make-union-node (new-id!) [] [%1 %2])
-                 (println "union")
-                 (bi-send-receive 1 1) => (ms/multiset 1)
-                 (bi-send-receive 2 2) => (ms/multiset 1 2)
-                 (bi-send-receive 1 2) => (ms/multiset 1 2)
-                 (bi-send-receive 1 1) => (ms/multiset 1 1 2))))
+(facts "about union"
+  (test-binode :multiset #(spark/make-union-node (new-id!) [] [%1 %2])
+    (bi-send-receive 1 1) => (ms/multiset 1)
+    (bi-send-receive 2 2) => (ms/multiset 1 2)
+    (bi-send-receive 1 2) => (ms/multiset 1 2)
+    (bi-send-receive 1 1) => (ms/multiset 1 1 2)))
 
 (comment
   (facts "about subtract"
     (test-binode :multiset #(spark/make-subtract-node (new-id!) [] [%1 %2])
-                 (println "subtract")
-                 (bi-send-receive 1 1) => (ms/multiset 1)
-                 (bi-send-receive 2 2) => (ms/multiset 1)
-                 (bi-send-receive 1 2) => (ms/multiset))))
+      (println "subtract")
+      (bi-send-receive 1 1) => (ms/multiset 1)
+      (bi-send-receive 2 2) => (ms/multiset 1)
+      (bi-send-receive 1 2) => (ms/multiset))))
 
 (comment
   (facts "about intersection"

@@ -257,6 +257,10 @@
 (defn multiset?
   [x]
   (satisfies? MultiSetBasic x))
+(defn multiplicities->multiset
+  [t]
+  (-> (ms/multiplicities->multiset t)
+      (RegularMultiSet. [] [])))
 
 ;; TODO: hash-get-latest
 ;; TODO: tests for hash-filter-key-size
