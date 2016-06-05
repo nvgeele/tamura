@@ -1,4 +1,5 @@
 (ns tamura.macros
+  (:refer-clojure :exclude [defn])
   (:require [clojure.core :as core]
             [clojure.tools.logging :as log]
             [tamura.values :as v]))

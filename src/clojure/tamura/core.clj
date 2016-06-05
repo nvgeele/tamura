@@ -1,4 +1,5 @@
 (ns tamura.core
+  (:refer-clojure :exclude [defn reset! delay reduce map filter print distinct])
   (:require [clojure.core :as core]
             [clojure.core.async :as a :refer [>!! >! <!! <! go go-loop]]
             [clojure.core.match :refer [match]]
