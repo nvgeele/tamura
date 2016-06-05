@@ -45,14 +45,18 @@
 
 (def ^:private print-lock (Object.))
 
-(defn- emptyRDD
+(defn- empty-rdd
   []
   (.emptyRDD sc))
+
+(defn- empty-pair-rdd
+  []
+  (JavaPairRDD/fromJavaRDD (.emptyRDD sc)))
 
 (defn parallelize-multiset*
   [ms]
   (if (empty? ms)
-    (emptyRDD)
+    (empty-pair-rdd)
     (->> (ms/multiplicities ms)
          (map (fn [[el m]]
                 (ft/tuple el m)))
@@ -61,7 +65,7 @@
 (defn parallelize-hash*
   [hash]
   (if (empty? hash)
-    (emptyRDD)
+    (empty-pair-rdd)
     (->> (mapcat (fn [[k ms]]
                    (map ft/tuple (repeat k) ms))
                  hash)
@@ -70,13 +74,13 @@
 (defn parallelize-multiset
   [ms]
   (if (multiset-empty? ms)
-    (emptyRDD)
+    (empty-pair-rdd)
     (parallelize-multiset* (to-multiset ms))))
 
 (defn parallelize-hash
   [hash]
   (if (hash-empty? hash)
-    (emptyRDD)
+    (empty-pair-rdd)
     (parallelize-hash* (to-hash hash))))
 
 (defn parallelize
@@ -243,7 +247,7 @@
    ^JavaPairRDD rdd]
   (.filter rdd filter-fn))
 
-(defn- rdd-multiplicities
+(defn- multiset-multiplicities-rdd
   [^JavaPairRDD rdd]
   (f/map-to-pair rdd multiplicities-fn))
 
@@ -271,7 +275,7 @@
                             (make-timed-hash timeout))
                           :else
                           (if (= return-type :multiset) (make-multiset) (make-hash)))
-              rdd (emptyRDD)
+              rdd (empty-pair-rdd)
               changes? false]
       (log/debug (str "source " id " has received: " (seq msg)))
       (match msg
@@ -336,7 +340,7 @@
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               previous-c (if (= (:return-type input-node) :hash) (make-hash) (make-multiset))
-              previous-r (emptyRDD)]
+              previous-r (empty-pair-rdd)]
       (log/debug (str "delay node " id " has received: " msg))
       (send-subscribers* @subscribers (:changed? msg) previous-r previous-c id)
       (if (:changed? msg)
@@ -355,7 +359,7 @@
     (go-loop [msg (<! input)
               previous nil
               buffer (if hash? (make-buffered-hash size) (make-buffered-multiset size))
-              rdd (emptyRDD)]
+              rdd (empty-pair-rdd)]
       (log/debug (str "buffer node " id " has received: " msg))
       (cond (and (:changed? msg) hash?)
             (let [removed (hash-removed (:collection msg))
@@ -387,7 +391,7 @@
         hash? (= (:return-type input-node) :hash)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              rdd (emptyRDD)]
+              rdd (empty-pair-rdd)]
       (log/debug (str "diff-add node " id " has received: " msg))
       (if (:changed? msg)
         (let [inserted ((if hash? hash-inserted multiset-inserted) (:collection msg))
@@ -409,7 +413,7 @@
         hash? (= (:return-type input-node) :hash)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              rdd (emptyRDD)]
+              rdd (empty-pair-rdd)]
       (log/debug (str "diff-remove node " id " has received: " msg))
       (if (:changed? msg)
         (let [inserted ((if hash? hash-removed multiset-removed) (:collection msg))
@@ -452,7 +456,7 @@
         map-fn (tamura.runtimes.MultisetMapFunction. f)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "map node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
@@ -474,7 +478,7 @@
         reduce-fn (tamura.runtimes.MultisetReduceFunction. f)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "reduce node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (multiset-reduce-rdd reduce-fn (:value msg))]
@@ -493,7 +497,7 @@
         filter-fn (tamura.runtimes.MultisetFilterFunction. pred)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "filter node " id " has received: " msg))
       (if (:changed? msg)
         (let [value (multiset-filter-rdd filter-fn (:value msg))]
@@ -511,11 +515,11 @@
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "multiplicities node" id " has received: " msg))
       ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
       (if (:changed? msg)
-        (let [value (rdd-multiplicities (:value msg))]
+        (let [value (multiset-multiplicities-rdd (:value msg))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
@@ -532,7 +536,7 @@
         inputs (subscribe-inputs inputs)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msgs (map <!! inputs)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "union node " id " has received: " msgs))
       (if (ormap :changed? msgs)
         (let [lmul (rdd-multiplicities (:value (first msgs)))
@@ -554,11 +558,11 @@
         inputs (subscribe-inputs inputs)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msgs (map <!! inputs)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "subtract node " id " has received: " msgs))
       (if (ormap :changed? msgs)
-        (let [lmul (rdd-multiplicities (:value (first msgs)))
-              rmul (rdd-multiplicities (:value (second msgs)))
+        (let [lmul (multiset-multiplicities-rdd (:value (first msgs)))
+              rmul (multiset-multiplicities-rdd (:value (second msgs)))
               value (-> (multiset-subtract (multiplicities->multiset lmul)
                                            (multiplicities->multiset rmul))
                         (parallelize))]
@@ -576,11 +580,11 @@
         inputs (subscribe-inputs inputs)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msgs (map <!! inputs)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "intersection node " id " has received: " msgs))
       (if (ormap :changed? msgs)
-        (let [lmul (rdd-multiplicities (:value (first msgs)))
-              rmul (rdd-multiplicities (:value (second msgs)))
+        (let [lmul (multiset-multiplicities-rdd (:value (first msgs)))
+              rmul (multiset-multiplicities-rdd (:value (second msgs)))
               value (-> (multiset-intersection (multiplicities->multiset lmul)
                                                (multiplicities->multiset rmul))
                         (parallelize))]
@@ -598,7 +602,7 @@
         input (subscribe-input input)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "distinct node " id " has received: " msg))
       (if (:changed? msg)
         (let [value (f/distinct (:value msg))]
@@ -620,7 +624,7 @@
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "map-by-key node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
@@ -642,7 +646,7 @@
         reduce-fn (tamura.runtimes.ReduceFunction. fn)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "reduce-by-key node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (if (.isEmpty (:value msg))
@@ -665,7 +669,7 @@
         filter-fn (fn/function (fn [^Tuple2 t] (pred (._2 t))))]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "filter-by-key node " id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
@@ -685,7 +689,7 @@
         filter-fn (tamura.runtimes.FilterKeySizeFunction. size)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "filter-key-size node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
@@ -707,7 +711,7 @@
         input (subscribe-input input-node)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
-              value (emptyRDD)]
+              value (empty-pair-rdd)]
       (log/debug (str "hash-to-multiset node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
