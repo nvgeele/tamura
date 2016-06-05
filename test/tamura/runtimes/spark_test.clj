@@ -426,13 +426,13 @@
     (send-receive 2) => (ms/multiset 2)
     (send-receive 3) => (ms/multiset 2)))
 
-(comment
-  (facts "about make-multiplicities-node"
-    (test-multiset-node #(spark/make-multiplicities-node (new-id!) [] [%])
-      (send-receive 'a) => (ms/multiset ['a 1])
-      (send-receive 'b) => (ms/multiset ['a 1] ['b 1])
-      (send-receive 'b) => (ms/multiset ['a 1] ['b 2])))
+(facts "about make-multiplicities-node"
+  (test-multiset-node #(spark/make-multiplicities-node (new-id!) [] [%])
+    (send-receive 'a) => (ms/multiset ['a 1])
+    (send-receive 'b) => (ms/multiset ['a 1] ['b 1])
+    (send-receive 'b) => (ms/multiset ['a 1] ['b 2])))
 
+(comment
   (facts "about union"
     (test-binode :multiset #(spark/make-union-node (new-id!) [] [%1 %2])
       (bi-send-receive 1 1) => (ms/multiset 1)

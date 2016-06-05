@@ -116,13 +116,11 @@
 
 (f/defsparkfn spark-identity [x] x)
 
-(f/defsparkfn multiplicities-seq-fn
-  [acc v]
-  (merge-with + acc (assoc {} v 1)))
-
-(f/defsparkfn multiplicities-com-fn
-  [l r]
-  (merge-with + l r))
+(f/defsparkfn multiplicities-fn
+  [^Tuple2 tup]
+  (let [e (._1 tup)
+        m (._2 tup)]
+    (ft/tuple [e m] 1)))
 
 (f/defsparkfn hash-to-multiset-map-fn
   [t]
@@ -246,10 +244,8 @@
   (.filter rdd filter-fn))
 
 (defn- rdd-multiplicities
-  [rdd]
-  (if (.isEmpty rdd)
-    {}
-    (f/aggregate rdd {} multiplicities-seq-fn multiplicities-com-fn)))
+  [^JavaPairRDD rdd]
+  (f/map-to-pair rdd multiplicities-fn))
 
 ;;;; PRIMITIVES ;;;;
 
@@ -519,10 +515,7 @@
       (log/debug (str "multiplicities node" id " has received: " msg))
       ;; NOTE: because we need to do a map and reduce, we use aggregate to combine the two
       (if (:changed? msg)
-        (let [m (rdd-multiplicities (:value msg))
-              value (if (empty? m)
-                      (:value msg)
-                      (f/parallelize sc (vec m)))]
+        (let [value (rdd-multiplicities (:value msg))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
