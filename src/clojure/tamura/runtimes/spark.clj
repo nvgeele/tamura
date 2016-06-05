@@ -159,8 +159,8 @@
   [f]
   [[] f])
 
-(defn reduce-function-call ^Boolean
-[^tamura.runtimes.ReduceFunction this lval rval]
+(defn reduce-function-call
+  [^tamura.runtimes.ReduceFunction this lval rval]
   (let [f (.state this)]
     (f lval rval)))
 
