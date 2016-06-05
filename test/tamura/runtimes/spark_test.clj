@@ -106,11 +106,11 @@
 
 (defn receive-hash
   []
-  (spark/collect-hash (:value (<!! *test-chan*))))
+  (spark/collect-hash* (:value (<!! *test-chan*))))
 
 (defn receive-multiset
   []
-  (spark/collect-multiset (:value (<!! *test-chan*))))
+  (spark/collect-multiset* (:value (<!! *test-chan*))))
 
 (defn receive
   []

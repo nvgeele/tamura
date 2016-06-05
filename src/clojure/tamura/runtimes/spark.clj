@@ -16,7 +16,7 @@
         [tamura.datastructures]
         [tamura.node]
         [tamura.util])
-  (:import [org.apache.spark.api.java JavaSparkContext]
+  (:import [org.apache.spark.api.java JavaPairRDD JavaSparkContext]
            [redis.clients.jedis Jedis]
            [scala Tuple2])
   (:gen-class))
@@ -45,26 +45,39 @@
 
 (def ^:private print-lock (Object.))
 
-(defn emptyRDD
+(defn- emptyRDD
   []
   (.emptyRDD sc))
+
+(defn parallelize-multiset*
+  [ms]
+  (if (empty? ms)
+    (emptyRDD)
+    (->> (ms/multiplicities ms)
+         (map (fn [[el m]]
+                (ft/tuple el m)))
+         (f/parallelize-pairs sc))))
+
+(defn parallelize-hash*
+  [hash]
+  (if (empty? hash)
+    (emptyRDD)
+    (->> (mapcat (fn [[k ms]]
+                   (map ft/tuple (repeat k) ms))
+                 hash)
+         (f/parallelize-pairs sc))))
 
 (defn parallelize-multiset
   [ms]
   (if (multiset-empty? ms)
     (emptyRDD)
-    (let [ms (seq (to-multiset ms))]
-      (f/parallelize sc ms))))
+    (parallelize-multiset* (to-multiset ms))))
 
 (defn parallelize-hash
   [hash]
   (if (hash-empty? hash)
     (emptyRDD)
-    (let [hash (to-hash hash)]
-      (->> (mapcat (fn [[k ms]]
-                     (map ft/tuple (repeat k) ms))
-                   hash)
-           (f/parallelize-pairs sc)))))
+    (parallelize-hash* (to-hash hash))))
 
 (defn parallelize
   [c]
@@ -72,19 +85,32 @@
         (hash? c) (parallelize-hash c)
         :else (throw (Exception. "type not supported"))))
 
-(defn collect-multiset
-  [rdd]
-  (let [c (f/collect rdd)]
-    (apply ms/multiset c)))
+(defn collect-multiset*
+  [^JavaPairRDD rdd]
+  (->> (f/collect rdd)
+       (reduce (fn [hash ^Tuple2 tuple]
+                 (let [e (._1 tuple)
+                       m (._2 tuple)]
+                   (assoc hash e m)))
+               {})
+       (ms/multiplicities->multiset)))
 
-(defn collect-hash
+(defn collect-hash*
   [rdd]
-  (reduce (fn [hash tuple]
+  (reduce (fn [hash ^Tuple2 tuple]
             (let [k (._1 tuple)
                   v (._2 tuple)]
               (update hash k #(if % (conj % v) (ms/multiset v)))))
           {}
           (f/collect rdd)))
+
+(defn collect-multiset
+  [ms]
+  (make-multiset (collect-multiset* ms)))
+
+(defn collect-hash
+  [hash]
+  (make-hash (collect-hash* hash)))
 
 ;;;; SPARK CLASSES AND FUNCTIONS ;;;;
 
@@ -338,8 +364,8 @@
   [id [form] [input-node]]
   (let [input (subscribe-input input-node)
         collector (if (= (:return-type input-node) :hash)
-                    collect-hash
-                    collect-multiset)]
+                    collect-hash*
+                    collect-multiset*)]
     (go-loop [msg (<! input)]
       (log/debug (str "print node " id " has received: " msg))
       (when (:changed? msg)
