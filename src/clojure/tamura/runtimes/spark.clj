@@ -155,6 +155,10 @@
   [^Tuple2 tup]
   (> (._2 tup) 0))
 
+(f/defsparkfn multiset-distinct-map-fn
+  [v]
+  1)
+
 (f/defsparkfn hash-to-multiset-map-fn
   [t]
   [(._1 t) (._2 t)])
@@ -299,6 +303,10 @@
   (-> (.leftOuterJoin left right)
       (f/map-to-pair multiset-intersection-map-fn)
       (f/filter multiset-filter-empties-fn)))
+
+(defn- multiset-distinct-rdd
+  [^JavaPairRDD rdd]
+  (f/map-values rdd multiset-distinct-map-fn))
 
 ;;;; PRIMITIVES ;;;;
 
@@ -645,7 +653,7 @@
               value (empty-pair-rdd)]
       (log/debug (str "distinct node " id " has received: " msg))
       (if (:changed? msg)
-        (let [value (f/distinct (:value msg))]
+        (let [value (multiset-distinct-rdd (:value msg))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)

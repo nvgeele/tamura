@@ -455,11 +455,10 @@
     (bi-send-receive 2 1)
     (bi-send-receive 2 2) => (ms/multiset 1 2 2)))
 
-(comment
-  (facts "about distinct"
-    (test-multiset-node #(spark/make-distinct-node (new-id!) [] [%])
-      (send-receive 2) => (ms/multiset 2)
-      (send-receive 1) => (ms/multiset 1 2)
-      (send-receive 2) => (ms/multiset 1 2))))
+(facts "about distinct"
+  (test-multiset-node #(spark/make-distinct-node (new-id!) [] [%])
+    (send-receive 2) => (ms/multiset 2)
+    (send-receive 1) => (ms/multiset 1 2)
+    (send-receive 2) => (ms/multiset 1 2)))
 
 (do-tests)
