@@ -398,13 +398,13 @@
       (send-receive :b 2) => (ms/multiset [:a 1] [:b 1] [:b 2]))))
 
 ;; multisets
-(comment
-  (facts "about map, function inc"
-    (test-multiset-node #(spark/make-map-node (new-id!) [spark-inc] [%])
-      (send-receive 1) => (ms/multiset 2)
-      (send-receive 2) => (ms/multiset 2 3)
-      (send-receive 3) => (ms/multiset 2 3 4)))
+(facts "about map, function inc"
+  (test-multiset-node #(spark/make-map-node (new-id!) [spark-inc] [%])
+    (send-receive 1) => (ms/multiset 2)
+    (send-receive 2) => (ms/multiset 2 3)
+    (send-receive 3) => (ms/multiset 2 3 4)))
 
+(comment
   (facts "about reduce, function (fn [a b] (+ a b))"
     (facts "multiset (no initial)"
       (test-multiset-node #(spark/make-reduce-node (new-id!) [reduce-fn false] [%])

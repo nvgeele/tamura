@@ -187,6 +187,26 @@
     {}
     (f/aggregate rdd {} multiplicities-seq-fn multiplicities-com-fn)))
 
+(gen-class
+  :name tamura.runtimes.MultisetMapFunction
+  :implements [org.apache.spark.api.java.function.PairFunction]
+  :state state
+  :init init
+  :constructors {[Object] []}
+  :prefix "multiset-map-function-")
+
+(defn multiset-map-function-init
+  [f]
+  [[] f])
+
+(defn multiset-map-function-call
+  [^tamura.runtimes.MultisetMapFunction this
+   ^Tuple2 tuple]
+  (let [f (.state this)]
+    (let [el (._1 tuple)
+          m (._2 tuple)]
+      (ft/tuple (f el) m))))
+
 ;;;; PRIMITIVES ;;;;
 
 ;;;;           SOURCES           ;;;;
@@ -388,14 +408,15 @@
   [id [f] [input-node]]
   (let [sub-chan (chan)
         subscribers (atom [])
-        input (subscribe-input input-node)]
+        input (subscribe-input input-node)
+        map-fn (tamura.runtimes.MultisetMapFunction. f)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (emptyRDD)]
       (log/debug (str "map node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
-                        (f/map f))]
+                        (.mapToPair map-fn))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
