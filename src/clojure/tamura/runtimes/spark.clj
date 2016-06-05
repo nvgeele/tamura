@@ -479,6 +479,48 @@
     (make-node id nt/filter-by-key :hash sub-chan)))
 (register-constructor! this-runtime nt/filter-by-key make-filter-by-key-node)
 
+;; TODO: Test if all works for empty RDDs
+;; TODO: Serializable function
+(defn make-map-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "map node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map f))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/map :multiset sub-chan)))
+(register-constructor! this-runtime nt/map make-map-node)
+
+;; TODO: Test if all works for empty RDDs
+;; TODO: Serializable function
+(defn make-map-by-key-node
+  [id [f] [input-node]]
+  (let [sub-chan (chan)
+        subscribers (atom [])
+        input (subscribe-input input-node)]
+    (subscriber-loop id sub-chan subscribers)
+    (go-loop [msg (<! input)
+              value (emptyRDD)]
+      (log/debug (str "map-by-key node" id " has received: " msg))
+      (if (:changed? msg)
+        (let [value (-> (:value msg)
+                        (f/map-values f))]
+          (send-subscribers @subscribers true value id)
+          (recur (<! input) value))
+        (do (send-subscribers @subscribers false value id)
+            (recur (<! input) value))))
+    (make-node id nt/map-by-key :hash sub-chan)))
+(register-constructor! this-runtime nt/map-by-key make-map-by-key-node)
+
 (comment
 
   (defn make-union-node
@@ -551,45 +593,7 @@
             (recur (<! input) value))
           (do (send-subscribers @subscribers false value id)
               (recur (<! input) value))))
-      (Node. id ::distinct :multiset sub-chan)))
-
-  ;; TODO: Test if all works for empty RDDs
-  (defn make-map-node
-    [id [f] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "map node" id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (-> (:value msg)
-                          (f/map f))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::map :multiset sub-chan)))
-
-  ;; TODO: Test if all works for empty RDDs
-  (defn make-map-by-key
-    [id [f] [input-node]]
-    (let [sub-chan (chan)
-          subscribers (atom [])
-          input (subscribe-input input-node)]
-      (subscriber-loop id sub-chan subscribers)
-      (go-loop [msg (<! input)
-                value (emptyRDD)]
-        (log/debug (str "map-by-key node" id " has received: " msg))
-        (if (:changed? msg)
-          (let [value (-> (:value msg)
-                          (f/map-values f))]
-            (send-subscribers @subscribers true value id)
-            (recur (<! input) value))
-          (do (send-subscribers @subscribers false value id)
-              (recur (<! input) value))))
-      (Node. id ::map-by-key :hash sub-chan))))
+      (Node. id ::distinct :multiset sub-chan))))
 
 (defn make-print-node
   [id [form] [input-node]]

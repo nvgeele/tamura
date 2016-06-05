@@ -363,21 +363,17 @@
     (send-receive :a 2) => {:a (ms/multiset 2)}
     (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2)}))
 
-(do-tests)
+(facts "about map, function inc"
+  (test-multiset-node #(spark/make-map-node (new-id!) [spark-inc] [%])
+    (send-receive 1) => (ms/multiset 2)
+    (send-receive 2) => (ms/multiset 2 3)
+    (send-receive 3) => (ms/multiset 2 3 4)))
 
-(comment
-  (facts "about map, function inc"
-    (test-multiset-node #(spark/make-map-node (new-id!) [inc] [%])
-      (send-receive 1) => (ms/multiset 2)
-      (send-receive 2) => (ms/multiset 2 3)
-      (send-receive 3) => (ms/multiset 2 3 4))))
-
-(comment
-  (facts "about map-by-key, function inc"
-    (test-hash-node #(spark/make-map-by-key-node (new-id!) [inc] [%])
-      (send-receive :a 1) => {:a (ms/multiset 2)}
-      (send-receive :b 1) => {:a (ms/multiset 2) :b (ms/multiset 2)}
-      (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2 3)})))
+(facts "about map-by-key, function inc"
+  (test-hash-node #(spark/make-map-by-key-node (new-id!) [spark-inc] [%])
+    (send-receive :a 1) => {:a (ms/multiset 2)}
+    (send-receive :b 1) => {:a (ms/multiset 2) :b (ms/multiset 2)}
+    (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2 3)}))
 
 (comment
   (facts "about union"
@@ -414,3 +410,5 @@
       (send-receive 2) => (ms/multiset 2)
       (send-receive 1) => (ms/multiset 1 2)
       (send-receive 2) => (ms/multiset 1 2))))
+
+(do-tests)

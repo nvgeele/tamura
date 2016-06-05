@@ -9,3 +9,7 @@
 (f/defsparkfn spark-even?
   [n]
   (even? n))
+
+(f/defsparkfn spark-inc
+  [n]
+  (inc n))
