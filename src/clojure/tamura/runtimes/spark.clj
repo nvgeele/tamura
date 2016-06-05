@@ -202,6 +202,47 @@
           m (._2 tuple)]
       (ft/tuple (f el) m))))
 
+(gen-class
+  :name tamura.runtimes.MultisetReduceFunction
+  :implements [org.apache.spark.api.java.function.Function2]
+  :state state
+  :init init
+  :constructors {[Object] []}
+  :prefix "multiset-reduce-function-")
+
+(defn multiset-reduce-function-init
+  [f]
+  [[] f])
+
+;; NOTE: If there are a small amount of elements but with high multiplicities, it might be worth it
+;; to first expand the PairRDD to a regular RDD and reduce this...
+(defn multiset-reduce-function-call
+  [^tamura.runtimes.MultisetReduceFunction this
+   ^Tuple2 lval
+   ^Tuple2 rval]
+  (let [f (.state this)
+        left-e (._1 lval)
+        left-m (._2 lval)
+        right-e (._1 rval)
+        right-m (._2 rval)
+        left-a (reduce f (repeat left-m left-e))
+        right-a (reduce f (repeat right-m right-e))]
+    (ft/tuple (f left-a right-a) 1)))
+
+(defn- multiset-reduce-rdd
+  [^tamura.runtimes.MultisetReduceFunction reduce-fn
+   ^JavaPairRDD rdd]
+  (if (.isEmpty rdd)
+    rdd
+    (-> (.reduce rdd reduce-fn)
+        ((fn [e] (f/parallelize sc [e]))))))
+
+(defn- rdd-multiplicities
+  [rdd]
+  (if (.isEmpty rdd)
+    {}
+    (f/aggregate rdd {} multiplicities-seq-fn multiplicities-com-fn)))
+
 ;;;; PRIMITIVES ;;;;
 
 ;;;;           SOURCES           ;;;;
@@ -426,17 +467,13 @@
   (let [sub-chan (chan)
         subscribers (atom [])
         input (subscribe-input input-node)
-        reduce-fn (tamura.runtimes.ReduceFunction. f)]
+        reduce-fn (tamura.runtimes.MultisetReduceFunction. f)]
     (subscriber-loop id sub-chan subscribers)
     (go-loop [msg (<! input)
               value (emptyRDD)]
       (log/debug (str "reduce node" id " has received: " msg))
       (if (:changed? msg)
-        (let [value (if (.isEmpty (:value msg))
-                      (:value msg)
-                      (-> (:value msg)
-                          (.reduce reduce-fn)
-                          ((fn [e] (f/parallelize sc [e])))))]
+        (let [value (multiset-reduce-rdd reduce-fn (:value msg))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)
