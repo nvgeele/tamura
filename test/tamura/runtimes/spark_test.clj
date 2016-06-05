@@ -432,14 +432,14 @@
     (send-receive 'b) => (ms/multiset ['a 1] ['b 1])
     (send-receive 'b) => (ms/multiset ['a 1] ['b 2])))
 
-(comment
-  (facts "about union"
-    (test-binode :multiset #(spark/make-union-node (new-id!) [] [%1 %2])
-      (bi-send-receive 1 1) => (ms/multiset 1)
-      (bi-send-receive 2 2) => (ms/multiset 1 2)
-      (bi-send-receive 1 2) => (ms/multiset 1 2)
-      (bi-send-receive 1 1) => (ms/multiset 1 1 2)))
+(facts "about union"
+  (test-binode :multiset #(spark/make-union-node (new-id!) [] [%1 %2])
+    (bi-send-receive 1 1) => (ms/multiset 1)
+    (bi-send-receive 2 2) => (ms/multiset 1 2)
+    (bi-send-receive 1 2) => (ms/multiset 1 2)
+    (bi-send-receive 1 1) => (ms/multiset 1 1 2)))
 
+(comment
   (facts "about subtract"
     (test-binode :multiset #(spark/make-subtract-node (new-id!) [] [%1 %2])
       (bi-send-receive 1 1) => (ms/multiset 1)

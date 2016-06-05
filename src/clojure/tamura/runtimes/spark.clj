@@ -16,7 +16,8 @@
         [tamura.datastructures]
         [tamura.node]
         [tamura.util])
-  (:import [org.apache.spark.api.java JavaPairRDD JavaSparkContext]
+  (:import [com.google.common.base Optional]
+           [org.apache.spark.api.java JavaPairRDD JavaSparkContext]
            [redis.clients.jedis Jedis]
            [scala Tuple2])
   (:gen-class))
@@ -125,6 +126,15 @@
   (let [e (._1 tup)
         m (._2 tup)]
     (ft/tuple [e m] 1)))
+
+;; TODO: better type hints, or casting?
+(f/defsparkfn multiset-union-map-fn
+  [^Tuple2 tup]
+  (let [el (._1 tup)
+        left-m (._1 (._2 tup))
+        right-m (._2 (._2 tup))]
+    (ft/tuple el (max (.or left-m 0)
+                      (.or right-m 0)))))
 
 (f/defsparkfn hash-to-multiset-map-fn
   [t]
@@ -250,6 +260,16 @@
 (defn- multiset-multiplicities-rdd
   [^JavaPairRDD rdd]
   (f/map-to-pair rdd multiplicities-fn))
+
+(defn- multiset-union-rdd
+  [^JavaPairRDD left
+   ^JavaPairRDD right]
+  (-> (.fullOuterJoin left right)
+      (f/map-to-pair multiset-union-map-fn)))
+
+(comment
+  "For union, we need to only do map.
+   For intersect and subtract we will probably need to filter first")
 
 ;;;; PRIMITIVES ;;;;
 
@@ -539,11 +559,8 @@
               value (empty-pair-rdd)]
       (log/debug (str "union node " id " has received: " msgs))
       (if (ormap :changed? msgs)
-        (let [lmul (rdd-multiplicities (:value (first msgs)))
-              rmul (rdd-multiplicities (:value (second msgs)))
-              value (-> (merge-with max lmul rmul)
-                        (multiplicities->multiset)
-                        (parallelize))]
+        (let [value (multiset-union-rdd (:value (first msgs))
+                                        (:value (second msgs)))]
           (send-subscribers @subscribers true value id)
           (recur (map <!! inputs) value))
         (do (send-subscribers @subscribers false value id)
