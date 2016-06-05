@@ -141,7 +141,8 @@
   [[] size])
 
 (defn filter-key-size-function-call
-  [this val]
+  [^tamura.runtimes.FilterKeySizeFunction this
+   ^Tuple2 val]
   (let [size (.state this)
         vals (._2 val)]
     (>= (count vals) size)))
@@ -159,7 +160,7 @@
   [[] f])
 
 (defn reduce-function-call ^Boolean
-[this lval rval]
+[^tamura.runtimes.ReduceFunction this lval rval]
   (let [f (.state this)]
     (f lval rval)))
 
@@ -176,7 +177,7 @@
   [[] pred])
 
 (defn filter-function-call ^Boolean
-[this val]
+[^tamura.runtimes.FilterFunction this val]
   (let [pred (.state this)]
     (pred val)))
 
