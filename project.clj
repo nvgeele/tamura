@@ -38,12 +38,16 @@
   :source-paths      ["src/clojure"]
   :java-source-paths ["src/java"]
 
+  :prep-tasks [["compile" "examples.bxl-helper"]
+               "javac" "compile"]
+
   :profiles {:dev
              {:aot [
                     ;examples.sparky
                     tamura.runtimes.spark
                     tamura.runtimes.spark-test-utils
                     examples.sparkruntime
+                    ;examples.bxl-helper
                     examples.bxl-direct-spark
                     examples.bxl-bench
                     ;tamura.runtimes.spark-test

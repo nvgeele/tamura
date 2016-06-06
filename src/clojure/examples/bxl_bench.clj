@@ -7,11 +7,8 @@
             [clj-time.format :as f])
   (:import [redis.clients.jedis Jedis]
            [examples.bxldirect BxlDirect])
-  (:gen-class
-    :name examples.BxlBench
-    :methods [#^{:static true} [append [Object] void]
-              #^{:static true} [getAppended [] java.util.List]
-              #^{:static true} [clearAppended [] void]]))
+  (:use [examples.bxl-helper])
+  (:gen-class))
 
 ;(def redis-host "134.184.49.17")
 (def redis-host "localhost")
@@ -28,21 +25,6 @@
           (and (>= deg 45.) (<= deg 135.)) :north
           (and (>= deg 135.) (<= deg 225.)) :west
           :else :south)))
-
-(def max-directions (atom []))
-
-(defn -append
-  [o]
-  (swap! max-directions conj o)
-  nil)
-
-(defn -getAppended
-  []
-  @max-directions)
-
-(defn -clearAppended
-  []
-  (reset! max-directions []))
 
 (defn create-graph
   []

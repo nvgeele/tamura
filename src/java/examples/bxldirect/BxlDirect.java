@@ -1,7 +1,7 @@
 package examples.bxldirect;
 
 import com.google.common.base.Optional;
-import examples.BxlBench;
+import examples.BxlHelper;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -33,7 +33,7 @@ import java.util.List;
 
 public class BxlDirect {
     static private int NUM_THREADS = 10;
-    static private String QUEUE;
+    static public String QUEUE;
 
     static private long start_time;
 
@@ -81,7 +81,7 @@ public class BxlDirect {
                     if(c.llen(BxlDirect.QUEUE) == 0) {
                         long finished = System.nanoTime();
                         double time = (double)(finished - start_time)/1000000.0;
-                        List a = BxlBench.getAppended();
+                        List a = BxlHelper.getAppended();
                         System.out.println("Appended: " + a.size());
                         System.out.println("Time: " + time);
                         System.out.println("We done here");
@@ -157,7 +157,7 @@ public class BxlDirect {
         }).foreachRDD(new VoidFunction2<JavaRDD<Tuple2<Point.Direction, Long>>, Time>() {
             @Override
             public void call(JavaRDD<Tuple2<Point.Direction, Long>> tuple2JavaRDD, Time time) throws Exception {
-                BxlBench.append(tuple2JavaRDD);
+                BxlHelper.append(tuple2JavaRDD);
             }
         });
     }
