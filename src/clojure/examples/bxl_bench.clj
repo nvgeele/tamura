@@ -2,10 +2,16 @@
   (:require [tamura.config :as cfg]
             [tamura.core :as t]
             [tamura.node :as n]
+            [tamura.runtimes.spark :as spark]
             [clj-time.core :as time]
             [clj-time.format :as f])
-  (:import [redis.clients.jedis Jedis])
-  (:gen-class))
+  (:import [redis.clients.jedis Jedis]
+           [examples.bxldirect BxlDirect])
+  (:gen-class
+    :name examples.BxlBench
+    :methods [#^{:static true} [append [Object] void]
+              #^{:static true} [getAppended [] java.util.List]
+              #^{:static true} [clearAppended [] void]]))
 
 ;(def redis-host "134.184.49.17")
 (def redis-host "localhost")
@@ -25,10 +31,18 @@
 
 (def max-directions (atom []))
 
-;; NOTE: because we are in a DSL we can do this...
-(defn create-appender
-  [signal]
-  (t/do-apply #(swap! max-directions conj (first %)) signal))
+(defn -append
+  [o]
+  (swap! max-directions conj o)
+  nil)
+
+(defn -getAppended
+  []
+  @max-directions)
+
+(defn -clearAppended
+  []
+  (reset! max-directions []))
 
 (defn create-graph
   []
@@ -47,7 +61,7 @@
                                 [d2 c2] t2]
                             (if (> c1 c2) t1 t2)))))]
     ;(t/print r)
-    (create-appender r)))
+    (t/do-apply (comp -append first) r)))
 
 ;;;;;;;;;;;;;;;
 
@@ -70,9 +84,7 @@
   (doto (Thread. (fn []
                    (loop []
                      (if (= (.llen conn redis-key) 0)
-                       (do
-                         (t/stop!)
-                         (continuation))
+                       (continuation)
                        (do
                          (Thread/sleep 100)
                          (recur))))))
@@ -84,7 +96,29 @@
 
 (def start-time (atom nil))
 
-;; (/ (double (- (. System (nanoTime)) start#)) 1000000.0)
+(defn setup-java!
+  []
+  (BxlDirect/setSparkContext spark/sc)
+  (BxlDirect/setCheckpointDir "/tmp/checkpoint")
+  (BxlDirect/setRedisHost redis-host)
+  (BxlDirect/setRedisKey redis-key))
+
+(defn test5
+  [conn users updates next]
+  (reset! max-directions [])
+  (BxlDirect/spawnMessages conn users updates)
+  (BxlDirect/start)
+  (reset! start-time (System/nanoTime))
+  (create-poll-thread
+    conn
+    (fn []
+      (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
+        (println "Done test 5 in" t)
+        (println)
+        (println (count @max-directions) "elements in max-directions")
+        (BxlDirect/stop)
+        (when next
+          ((first next) conn users updates (rest next)))))))
 
 (defn test4
   [conn users updates next]
@@ -101,7 +135,9 @@
     (fn []
       (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
         (println "Done test 4 in" t)
+        (println)
         (println (count @max-directions) "elements in max-directions")
+        (t/stop!)
         (when next
           ((first next) conn users updates (rest next))))))
   (println "Started test 4"))
@@ -121,7 +157,9 @@
     (fn []
       (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
         (println "Done test 3 in" t)
+        (println)
         (println (count @max-directions) "elements in max-directions")
+        (t/stop!)
         (when next
           ((first next) conn users updates (rest next))))))
   (println "Started test 3"))
@@ -140,7 +178,9 @@
     (fn []
       (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
         (println "Done test 2 in" t)
+        (println)
         (println (count @max-directions) "elements in max-directions")
+        (t/stop!)
         (when next
           ((first next) conn users updates (rest next))))))
   (println "Started test 2"))
@@ -157,7 +197,9 @@
     (fn []
       (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
         (println "Done test 1 in" t)
+        (println)
         (println (count @max-directions) "elements in max-directions")
+        (t/stop!)
         (when next
           ((first next) conn users updates (rest next))))))
   (println "Started test 1"))
@@ -167,10 +209,20 @@
   (println "Done!")
   (System/exit 0))
 
+(defn do-tests
+  [conn users updates tests]
+  (apply (first tests) [conn users updates (concat (rest tests) [stopper])]))
+
 (defn -main
   [users updates]
   (let [users (read-string users)
         updates (read-string updates)
         conn (Jedis. redis-host)]
+    (spark/setup-spark!)
+    (setup-java!)
     (println "Starting tests...")
-    (test2 conn users updates [test4 stopper])))
+    ;(push-messages conn users updates)
+    (do-tests conn users updates
+              [test2 test2 test2 test2 test2
+               test4 test4 test4 test4 test4
+               test5 test5 test5 test5 test5])))

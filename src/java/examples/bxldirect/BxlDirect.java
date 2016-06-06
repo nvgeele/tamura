@@ -32,8 +32,8 @@ import java.util.HashMap;
 import java.util.List;
 
 public class BxlDirect {
-    static final int NUM_THREADS = 10;
-    static final String QUEUE = "bxlqueue";
+    static private int NUM_THREADS = 10;
+    static private String QUEUE;
 
     static private long start_time;
 
@@ -47,6 +47,14 @@ public class BxlDirect {
 
     public static void setSparkContext(JavaSparkContext x) {
         sc = x;
+    }
+
+    public static void setRedisHost(String host) {
+        RedisConfig.setRedisHost(host);
+    }
+
+    public static void setRedisKey(String key) {
+        QUEUE = key;
     }
 
     public static void spawnMessages(Jedis conn, int users, int updates) {
@@ -184,6 +192,9 @@ public class BxlDirect {
 
         JavaSparkContext sc = new JavaSparkContext(sparkConf);
         setSparkContext(sc);
+
+        setRedisHost("localhost");
+        setRedisKey("bxlqueue");
 
         if(local && args.length <= 1) {
             start();
