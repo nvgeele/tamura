@@ -17,7 +17,7 @@
 ;; TODO: leasing when no data has changed?
 ;; TODO: ping node to do leasing now and then
 
-(def ^{:private true} this-runtime :clj)
+(def this-runtime :clj)
 
 (def ^:private print-lock (Object.))
 

@@ -28,9 +28,9 @@
 
 ;;;; SET-UP & CONFIG ;;;;
 
-(def ^{:private true} this-runtime :spark)
+(def this-runtime :spark)
 
-(def ^:private ^JavaSparkContext sc nil)
+(def ^JavaSparkContext sc nil)
 
 (defn setup-spark!
   []
