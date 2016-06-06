@@ -27,12 +27,9 @@ public class RedisReceiver extends Receiver<UserPosition> {
                 while(true) {
                     try {
                         jedis = pool.getResource();
-                        String str = jedis.rpop(BxlDirect.QUEUE);
+                        String str = jedis.blpop(0, BxlDirect.QUEUE).get(1);
                         if(str != null)
                             store(UserPosition.fromString(str));
-                        Thread.sleep(10);
-                    } catch(InterruptedException e) {
-                        e.printStackTrace();
                     } finally {
                         if (jedis != null) {
                             jedis.close();
@@ -46,6 +43,7 @@ public class RedisReceiver extends Receiver<UserPosition> {
 
     @Override
     public void onStop() {
-        runner.stop();
+        runner.interrupt();
+        new Jedis(RedisConfig.getRedisHost()).lpush(BxlDirect.QUEUE, "");
     }
 }

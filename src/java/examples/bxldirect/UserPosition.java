@@ -12,7 +12,8 @@ public class UserPosition implements Serializable {
     public static UserPosition fromString(String str) {
         String[] split = str.split(";");
         Point p = Point.fromString(split[1] + ";" + split[2]);
-        return new UserPosition(split[0], p, Instant.now());
+        Instant date = Instant.parse(split[3]);
+        return new UserPosition(split[0], p, date);
     }
 
     public final String userId;
@@ -27,6 +28,6 @@ public class UserPosition implements Serializable {
 
     @Override
     public String toString() {
-        return userId + ";" + position.toString();
+        return userId + ";" + position.toString() + ";" + date.toString();
     }
 }

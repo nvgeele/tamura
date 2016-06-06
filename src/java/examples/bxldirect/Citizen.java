@@ -1,5 +1,6 @@
 package examples.bxldirect;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import redis.clients.jedis.Jedis;
@@ -26,7 +27,7 @@ public class Citizen extends Thread {
 
             while(true) {
                 position = new Point(Math.random(), Math.random());
-                String toSend = userId + ";" + position.toString();
+                String toSend = userId + ";" + position.toString() + ";" + Instant.now();
                 jedis.lpush(BxlDirect.QUEUE, toSend);
 
                 Thread.sleep(Math.round(Math.random() * 100) + 1000);
