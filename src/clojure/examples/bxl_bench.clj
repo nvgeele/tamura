@@ -13,6 +13,7 @@
 ;(def redis-host "134.184.49.17")
 (def redis-host "localhost")
 (def redis-key "bxlqueue")
+(def throttle-time (atom 1000))
 
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
@@ -83,7 +84,8 @@
   (BxlDirect/setSparkContext spark/sc)
   (BxlDirect/setCheckpointDir "/tmp/checkpoint")
   (BxlDirect/setRedisHost redis-host)
-  (BxlDirect/setRedisKey redis-key))
+  (BxlDirect/setRedisKey redis-key)
+  (BxlDirect/setDuration @throttle-time))
 
 (defn test5
   [conn users updates next]
@@ -106,7 +108,7 @@
   [conn users updates next]
   (reset! max-directions [])
   (t/reset!)
-  (swap! cfg/config assoc :throttle 1000)
+  (swap! cfg/config assoc :throttle @throttle-time)
   (swap! cfg/config assoc :runtime :spark)
   (push-messages conn users updates)
   (create-graph)
@@ -150,7 +152,7 @@
   [conn users updates next]
   (reset! max-directions [])
   (t/reset!)
-  (swap! cfg/config assoc :throttle 1000)
+  (swap! cfg/config assoc :throttle @throttle-time)
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
@@ -196,10 +198,15 @@
   (apply (first tests) [conn users updates (concat (rest tests) [stopper])]))
 
 (defn -main
-  [users updates]
+  [users updates & [cores throttle]]
   (let [users (read-string users)
         updates (read-string updates)
-        conn (Jedis. redis-host)]
+        conn (Jedis. redis-host)
+        cores (if cores (read-string cores) 0)
+        cores (if (= cores 0) "*" cores)
+        throttle (if throttle (read-string throttle) 1000)]
+    (reset! throttle-time throttle)
+    (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
     (spark/setup-spark!)
     (setup-java!)
     (println "Starting tests...")

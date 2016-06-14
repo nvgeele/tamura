@@ -41,6 +41,8 @@ public class BxlDirect {
     static private JavaSparkContext sc;
     static private JavaStreamingContext ssc;
 
+    static private int duration = 1000;
+
     public static void setCheckpointDir(String x) {
         checkpointDir = x;
     }
@@ -55,6 +57,10 @@ public class BxlDirect {
 
     public static void setRedisKey(String key) {
         QUEUE = key;
+    }
+
+    public static void setDuration(int d) {
+        duration = d;
     }
 
     public static void spawnMessages(Jedis conn, int users, int updates) {
@@ -163,7 +169,7 @@ public class BxlDirect {
     }
 
     static private void setupStreamingContext() {
-        ssc = new JavaStreamingContext(sc, Durations.seconds(1));
+        ssc = new JavaStreamingContext(sc, Durations.milliseconds(duration));
         ssc.checkpoint(checkpointDir);
     }
 
