@@ -18,8 +18,11 @@
         [tamura.util])
   (:import [com.google.common.base Optional]
            [org.apache.spark.api.java JavaPairRDD JavaSparkContext]
+           [org.apache.spark.streaming.api.java JavaStreamingContext]
            [redis.clients.jedis Jedis]
-           [scala Tuple2])
+           [scala Tuple2]
+           [tamura.spark.receivers RedisReceiver]
+           [org.apache.spark.streaming Durations])
   (:gen-class))
 
 ;; TODO: (future work) type hints
@@ -31,6 +34,14 @@
 (def this-runtime :spark)
 
 (def ^JavaSparkContext sc nil)
+(def ^JavaStreamingContext ssc nil)
+
+(defn- setup-streaming-context!
+  []
+  (alter-var-root
+    (var ssc)
+    (fn [& args]
+      (JavaStreamingContext. sc (Durations/milliseconds (cfg/throttle?))))))
 
 (defn setup-spark!
   []
@@ -41,7 +52,21 @@
         (-> (conf/spark-conf)
             (conf/app-name (cfg/spark-app-name))
             (conf/master (cfg/spark-master))
-            (f/spark-context))))))
+            (f/spark-context)))))
+  (when (cfg/throttle?)
+    (setup-streaming-context!)))
+
+(defn start-spark!
+  []
+  (when (cfg/throttle?)
+    ;; TODO: do we really need a checkpoint dir?
+    (.checkpoint ssc (cfg/spark-checkpoint-dir))
+    (.start ssc)))
+
+(defn stop-spark!
+  []
+  (when (cfg/throttle?)
+    (.stop ssc false)))
 
 ;;;; HELPERS ;;;;
 
@@ -394,19 +419,34 @@
     (make-source id nt/source return-type in in)))
 (register-constructor! this-runtime nt/source make-source-node)
 
+;; TODO: if throttle is on, then do the following
+;; - make a redis receiver for spark streaming
+;; - foreachRDD collect, and push all
 (defn make-redis-node
   [id [return-type host queue key buffer timeout] []]
-  (let [source-node (make-source-node id [return-type :timeout timeout :buffer buffer] [])
-        conn (Jedis. host)]
-    (threadloop []
-      (let [v (second (.blpop conn 0 (into-array String [queue])))
-            parsed (edn/read-string v)
-            value (if key
-                    [(get parsed key) (dissoc parsed key)]
-                    parsed)]
-        (>!! (:in *coordinator*) {:destination id :value value})
-        (recur)))
-    source-node))
+  (if (cfg/throttle?)
+    (let [source-node (make-source-node id [return-type :timeout timeout :buffer buffer] [])
+          redis-input (.receiverStream ssc (RedisReceiver. host queue))]
+      ;; TODO: helper class
+      ;; TODO: bulk receive for coordinator
+      (fs/foreach-rdd
+        redis-input
+        (fn [rdd time]
+          (let [input (f/collect rdd)]
+            (doseq [v input]
+              (>!! (:in *coordinator*) {:destination id :value (edn/read-string v)})))))
+      source-node)
+    (let [source-node (make-source-node id [return-type :timeout timeout :buffer buffer] [])
+          conn (Jedis. host)]
+      (threadloop []
+        (let [v (second (.blpop conn 0 (into-array String [queue])))
+              parsed (edn/read-string v)
+              value (if key
+                      [(get parsed key) (dissoc parsed key)]
+                      parsed)]
+          (>!! (:in *coordinator*) {:destination id :value value})
+          (recur)))
+      source-node)))
 (register-constructor! this-runtime nt/redis make-redis-node)
 
 ;;;;  "POLYMORPHIC" OPERATIONS   ;;;;

@@ -4,7 +4,8 @@
   {:runtime :clj
    :throttle false
    :spark {:app-name "tamura-app"
-           :master "local[*]"}})
+           :master "local[*]"
+           :checkpoint-dir "/tmp/checkpoint"}})
 
 (def config (atom default-config))
 
@@ -25,3 +26,7 @@
 (defn spark-master
   []
   (get-in @config [:spark :master] (get-in default-config [:spark :master])))
+
+(defn spark-checkpoint-dir
+  []
+  (get-in @config [:spark :checkpoint-dir] (get-in default-config [:spark :checkpoint-dir])))

@@ -43,6 +43,7 @@
   ;; NOTE: we wait one second to ensure all nodes had time to subscribe
   (Thread/sleep 1000)
   (>!! (:in *coordinator*) :start)
+  (when (= (cfg/runtime) :spark) (spark/start-spark!))
   (swap! threads #(doall (for [t %]
                            (let [thread (Thread. (:body t))]
                              (.start thread)
@@ -56,6 +57,7 @@
   (swap! threads #(doall (for [t %]
                            (do (.stop (:thread t))
                                (dissoc t :thread)))))
+  (when (= (cfg/runtime) :spark) (spark/stop-spark!))
   (>!! (:in *coordinator*) :stop))
 
 (core/defn reset!
