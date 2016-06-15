@@ -87,16 +87,24 @@
   (BxlDirect/setRedisKey redis-key)
   (BxlDirect/setDuration @throttle-time))
 
+(defn start-time!
+  []
+  (reset! start-time (System/nanoTime)))
+
+(defn stop-time!
+  []
+  (/ (double (- (System/nanoTime) @start-time)) 1000000.0))
+
 (defn test5
   [conn users updates next]
   (reset! max-directions [])
   (BxlDirect/spawnMessages conn users updates)
   (BxlDirect/start)
-  (reset! start-time (System/nanoTime))
+  (start-time!)
   (create-poll-thread
     conn
     (fn []
-      (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
+      (let [t (stop-time!)]
         (println "Done test 5 in" t)
         (println)
         (println (count @max-directions) "elements in max-directions")
@@ -113,11 +121,11 @@
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
-  (reset! start-time (System/nanoTime))
+  (start-time!)
   (create-poll-thread
     conn
     (fn []
-      (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
+      (let [t (stop-time!)]
         (println "Done test 4 in" t)
         (println)
         (println (count @max-directions) "elements in max-directions")
@@ -135,11 +143,11 @@
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
-  (reset! start-time (System/nanoTime))
+  (start-time!)
   (create-poll-thread
     conn
     (fn []
-      (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
+      (let [t (stop-time!)]
         (println "Done test 3 in" t)
         (println)
         (println (count @max-directions) "elements in max-directions")
@@ -156,11 +164,11 @@
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
-  (reset! start-time (System/nanoTime))
+  (start-time!)
   (create-poll-thread
     conn
     (fn []
-      (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
+      (let [t (stop-time!)]
         (println "Done test 2 in" t)
         (println)
         (println (count @max-directions) "elements in max-directions")
@@ -175,11 +183,11 @@
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
-  (reset! start-time (System/nanoTime))
+  (start-time!)
   (create-poll-thread
     conn
     (fn []
-      (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
+      (let [t (stop-time!)]
         (println "Done test 1 in" t)
         (println)
         (println (count @max-directions) "elements in max-directions")
