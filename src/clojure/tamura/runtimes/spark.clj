@@ -399,6 +399,14 @@
             (send-subscribers* subs true rdd new-coll id)
             (recur (<! in) subs new-coll rdd false)))
 
+        ;; TODO: implement
+        ;; NOTE: if a source receives this message, we assume throttle? is not false
+        {:destination id :values values}
+        (let [new-coll (if (= return-type :multiset)
+                         (reduce (fn [s v] (multiset-insert* s v)) value values)
+                         (reduce (fn [h [k v]] (hash-insert* h k v)) value values))]
+          (recur (<! in) subs new-coll rdd true))
+
         {:destination _}
         (do (when-not (cfg/throttle?)
               (send-subscribers* subs false rdd value id))
@@ -432,9 +440,12 @@
       (fs/foreach-rdd
         redis-input
         (fn [rdd time]
-          (let [input (f/collect rdd)]
-            (doseq [v input]
-              (>!! (:in *coordinator*) {:destination id :value (edn/read-string v)})))))
+          (let [vals (map #(let [parsed (edn/read-string %)]
+                            (if key
+                              [(get parsed key) (dissoc parsed key)]
+                              parsed))
+                          (f/collect rdd))]
+            (>!! (:in *coordinator*) {:destination id :values vals}))))
       source-node)
     (let [source-node (make-source-node id [return-type :timeout timeout :buffer buffer] [])
           conn (Jedis. host)]

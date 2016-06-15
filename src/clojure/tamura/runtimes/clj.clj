@@ -65,6 +65,10 @@
             (send-subscribers subs true (transformer new-coll) id)
             (recur (<! in) subs new-coll false)))
 
+        ;; TODO: implement
+        {:destination id :values values}
+        (throw (Exception. "finish me"))
+
         {:destination _}
         (do (when-not (cfg/throttle?)
               (send-subscribers subs false (transformer value) id))
