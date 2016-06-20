@@ -5,7 +5,8 @@
             [tamura.profile :as profile]
             [tamura.runtimes.spark :as spark]
             [clj-time.core :as time]
-            [clj-time.format :as f])
+            [clj-time.format :as f]
+            [clojure.pprint :as pprint])
   (:import [redis.clients.jedis Jedis]
            [examples.bxldirect BxlDirect]
            [java.lang Math])
@@ -290,10 +291,12 @@
   (println "Throttle time:" @throttle-time)
   (println "Spark master:" (cfg/spark-master))
   (println)
-  (doseq [[k times] @times]
-    (let [avg (mean times)
-          dev (standard-deviation times)]
-      (println (format "Test `%s' average time: %.2f ± %.2f" k avg dev))))
+  (let [results (map (fn [[k times]]
+                       {:test    k
+                        :avg     (format "%.2f" (mean times))
+                        :std-dev (format "%.2f" (standard-deviation times))})
+                     @times)]
+    (pprint/print-table results))
   (println "-------------------------")
   (System/exit 0))
 
