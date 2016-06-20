@@ -375,17 +375,45 @@
     (send-receive :b 2) => (ms/multiset [:a 1] [:b 1] [:b 2])
     (send-receive :b 2) => (ms/multiset [:a 1] [:b 1] [:b 2] [:b 2])))
 
-(facts "about map, function inc"
-  (test-multiset-node #(cr/make-map-node (new-id!) [inc] [%])
-    (send-receive 1) => (ms/multiset 2)
-    (send-receive 2) => (ms/multiset 2 3)
-    (send-receive 3) => (ms/multiset 2 3 4)))
+(facts "about map"
+  (facts "function inc"
+    (test-multiset-node #(cr/make-map-node (new-id!) [inc] [%])
+      (send-receive 1) => (ms/multiset 2)
+      (send-receive 1) => (ms/multiset 2 2)
+      (send-receive 2) => (ms/multiset 2 2 3)
+      (send-receive 3) => (ms/multiset 2 2 3 4)))
+  (facts "function second for tuples"
+    (test-multiset-node #(cr/make-map-node (new-id!) [second] [%])
+      (send-receive [1 'a]) => (ms/multiset 'a)
+      (send-receive [2 'b]) => (ms/multiset 'a 'b)
+      (send-receive [3 'c]) => (ms/multiset 'a 'b 'c)
+      (send-receive [4 'a]) => (ms/multiset 'a 'b 'c 'a)))
+  (facts "constant function returning 42"
+    (test-multiset-node #(cr/make-map-node (new-id!) [(constantly 42)] [%])
+      (send-receive 1) => (ms/multiset 42)
+      (send-receive 2) => (ms/multiset 42 42)
+      (send-receive 3) => (ms/multiset 42 42 42)
+      (send-receive 4) => (ms/multiset 42 42 42 42))))
 
-(facts "about map-by-key, function inc"
-  (test-hash-node #(cr/make-map-by-key-node (new-id!) [inc] [%])
-    (send-receive :a 1) => {:a (ms/multiset 2)}
-    (send-receive :b 1) => {:a (ms/multiset 2) :b (ms/multiset 2)}
-    (send-receive :b 2) => {:a (ms/multiset 2) :b (ms/multiset 2 3)}))
+(facts "about map-by-key"
+  (facts "function inc"
+    (test-hash-node #(cr/make-map-by-key-node (new-id!) [inc] [%])
+      (send-receive :a 1) => {:a (ms/multiset 2)}
+      (send-receive :a 1) => {:a (ms/multiset 2 2)}
+      (send-receive :b 1) => {:a (ms/multiset 2 2) :b (ms/multiset 2)}
+      (send-receive :b 2) => {:a (ms/multiset 2 2) :b (ms/multiset 2 3)}))
+  (facts "function second for tuples"
+    (test-hash-node #(cr/make-map-by-key-node (new-id!) [second] [%])
+      (send-receive :a [1 'a]) => {:a (ms/multiset 'a)}
+      (send-receive :a [2 'b]) => {:a (ms/multiset 'a 'b)}
+      (send-receive :a [3 'c]) => {:a (ms/multiset 'a 'b 'c)}
+      (send-receive :a [4 'a]) => {:a (ms/multiset 'a 'b 'c 'a)}))
+  (facts "constant function returning 42"
+    (test-hash-node #(cr/make-map-by-key-node (new-id!) [(constantly 42)] [%])
+      (send-receive :a 1) => {:a (ms/multiset 42)}
+      (send-receive :a 2) => {:a (ms/multiset 42 42)}
+      (send-receive :a 3) => {:a (ms/multiset 42 42 42)}
+      (send-receive :a 4) => {:a (ms/multiset 42 42 42 42)})))
 
 (facts "about filter, function even?"
   (test-multiset-node #(cr/make-filter-node (new-id!) [even?] [%])

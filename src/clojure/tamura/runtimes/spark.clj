@@ -130,7 +130,9 @@
 
 (defn collect-hash*
   [rdd]
+  ;(println (f/collect rdd))
   (reduce (fn [hash ^Tuple2 tuple]
+            ;(println tuple)
             (let [k (._1 tuple)
                   v (._2 tuple)]
               (update hash k #(if % (conj % v) (ms/multiset v)))))
@@ -181,6 +183,8 @@
 ;;;; SPARK CLASSES AND FUNCTIONS ;;;;
 
 (f/defsparkfn spark-identity [x] x)
+
+(f/defsparkfn spark-plus-fn [l r] (+ l r))
 
 (f/defsparkfn multiplicities-fn
   [^Tuple2 tup]
@@ -653,7 +657,8 @@
       (log/debug (str "map node" id " has received: " msg))
       (if (:changed? msg)
         (let [value (-> (:value msg)
-                        (.mapToPair map-fn))]
+                        (.mapToPair map-fn)
+                        (f/reduce-by-key spark-plus-fn))]
           (send-subscribers @subscribers true value id)
           (recur (<! input) value))
         (do (send-subscribers @subscribers false value id)

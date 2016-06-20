@@ -13,3 +13,13 @@
 (f/defsparkfn spark-inc
   [n]
   (inc n))
+
+(f/defsparkfn spark-second
+  [x]
+  (second x))
+
+(f/defsparkfn spark-constant
+  [x]
+  42)
+
+(f/defsparkfn spark-identity [x] x)
