@@ -7,7 +7,8 @@
             [clj-time.core :as time]
             [clj-time.format :as f])
   (:import [redis.clients.jedis Jedis]
-           [examples.bxldirect BxlDirect])
+           [examples.bxldirect BxlDirect]
+           [java.lang Math])
   (:use [examples.bxl-helper])
   (:gen-class))
 
@@ -84,26 +85,6 @@
   [conn]
   (.del conn redis-key))
 
-(def start-time (atom nil))
-
-(defn setup-java!
-  []
-  (BxlDirect/setSparkContext spark/sc)
-  (BxlDirect/setCheckpointDir "/tmp/checkpoint")
-  (BxlDirect/setRedisHost redis-host)
-  (BxlDirect/setRedisKey redis-key)
-  (BxlDirect/setDuration @throttle-time)
-  (BxlDirect/setRedisOutKey redis-out-key)
-  (BxlDirect/setRedisOut redis-out?))
-
-(defn start-time!
-  []
-  (reset! start-time (System/nanoTime)))
-
-(defn stop-time!
-  []
-  (/ (double (- (System/nanoTime) @start-time)) 1000000.0))
-
 (defn clear-out-queue!
   []
   (let [conn (Jedis. redis-host)]
@@ -116,6 +97,29 @@
         count (.llen conn redis-out-key)]
     (.close conn)
     count))
+
+(defn setup-java!
+  []
+  (BxlDirect/setSparkContext spark/sc)
+  (BxlDirect/setCheckpointDir "/tmp/checkpoint")
+  (BxlDirect/setRedisHost redis-host)
+  (BxlDirect/setRedisKey redis-key)
+  (BxlDirect/setDuration @throttle-time)
+  (BxlDirect/setRedisOutKey redis-out-key)
+  (BxlDirect/setRedisOut redis-out?))
+
+(def start-time (atom nil))
+(def times (atom {}))
+
+(defn start-time!
+  []
+  (reset! start-time (System/nanoTime)))
+
+(defn stop-time!
+  [key]
+  (let [t (/ (double (- (System/nanoTime) @start-time)) 1000000.0)]
+    (swap! times update key conj t)
+    t))
 
 (defn continue
   [conn users updates next]
@@ -135,7 +139,7 @@
   (create-poll-thread
     conn
     (fn []
-      (let [t (stop-time!)]
+      (let [t (stop-time! :pure-spark-streaming)]
         (BxlDirect/stop)
         (println "Done test pure-spark-streaming in" t)
         (println)
@@ -157,7 +161,7 @@
   (create-poll-thread
     conn
     (fn []
-      (let [t (stop-time!)]
+      (let [t (stop-time! :spark-runtime-throttled-receivers)]
         (t/stop!)
         (println "Done test spark-runtime-throttled-receivers in" t)
         (println)
@@ -183,7 +187,7 @@
   (create-poll-thread
     conn
     (fn []
-      (let [t (stop-time!)]
+      (let [t (stop-time! :spark-runtime-throttled)]
         (t/stop!)
         (println "Done test spark-runtime-throttled in" t)
         (println)
@@ -209,7 +213,7 @@
   (create-poll-thread
     conn
     (fn []
-      (let [t (stop-time!)]
+      (let [t (stop-time! :spark-runtime-no-throttle)]
         (t/stop!)
         (println "Done test spark-runtime-no-throttle in" t)
         (println)
@@ -235,7 +239,7 @@
   (create-poll-thread
     conn
     (fn []
-      (let [t (stop-time!)]
+      (let [t (stop-time! :clj-runtime-throttled)]
         (t/stop!)
         (println "Done test clj-runtime-throttled in" t)
         (println)
@@ -256,7 +260,7 @@
   (create-poll-thread
     conn
     (fn []
-      (let [t (stop-time!)]
+      (let [t (stop-time! :clj-runtime-no-throttle)]
         (t/stop!)
         (println "Done test clj-runtime-no-throttle in" t)
         (println)
@@ -266,14 +270,29 @@
         (continue conn users updates next))))
   (println "Started test clj-runtime-no-throttle"))
 
-(defn stopper
+(defn mean
+  [vals]
+  (/ (apply + vals) (count vals)))
+
+(defn standard-deviation
+  [vals]
+  (let [c (count vals)
+        avg (/ (apply + vals) c)]
+    (Math/sqrt (/ (reduce + (map #(* (- % avg) (- % avg)) vals)) (- c 1)))))
+
+(defn report
   [& args]
-  (println "Done!")
+  (println "-------------------------")
+  (doseq [[k times] @times]
+    (let [avg (mean times)
+          dev (standard-deviation times)]
+      ((comp println str)
+        "Test `" k "' average time: " avg "±" dev)))
   (System/exit 0))
 
 (defn do-tests
   [conn users updates tests]
-  (apply (first tests) [conn users updates (concat (rest tests) [stopper])]))
+  (apply (first tests) [conn users updates (concat (rest tests) [report])]))
 
 (def test-fns
   [clj-runtime-no-throttle
@@ -291,7 +310,7 @@
         cores (if cores (read-string cores) 0)
         cores (if (= cores 0) "*" cores)
         throttle (if throttle (read-string throttle) 1000)
-        tests [0 0 0 2 2 2]]
+        tests [0 0 0 5 0 0]]
     (alter-var-root (var redis-out?) (constantly (if (read-string redis-output?) true false)))
     (reset! throttle-time throttle)
     (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
