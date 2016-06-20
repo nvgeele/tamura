@@ -281,13 +281,20 @@
     (Math/sqrt (/ (reduce + (map #(* (- % avg) (- % avg)) vals)) (- c 1)))))
 
 (defn report
-  [& args]
+  [conn users updates & args]
   (println "-------------------------")
+  (println "Users:" users)
+  (println "Updates per user:" updates)
+  (println "Total messages:" (* users updates))
+  (println "Redis output:" redis-out?)
+  (println "Throttle time:" @throttle-time)
+  (println "Spark master:" (cfg/spark-master))
+  (println)
   (doseq [[k times] @times]
     (let [avg (mean times)
           dev (standard-deviation times)]
-      ((comp println str)
-        "Test `" k "' average time: " avg " ± " dev)))
+      (println (format "Test `%s' average time: %.2f ± %.2f" k avg dev))))
+  (println "-------------------------")
   (System/exit 0))
 
 (defn do-tests
