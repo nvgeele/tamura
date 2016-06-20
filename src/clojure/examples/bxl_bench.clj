@@ -49,6 +49,11 @@
     (t/redis-out r redis-host redis-out-key)
     ))
 
+(def redis-out?
+  ;true
+  false
+  )
+
 ;;;;;;;;;;;;;;;
 
 (defn push-messages
@@ -89,7 +94,8 @@
   (BxlDirect/setRedisHost redis-host)
   (BxlDirect/setRedisKey redis-key)
   (BxlDirect/setDuration @throttle-time)
-  (BxlDirect/setRedisOutKey redis-out-key))
+  (BxlDirect/setRedisOutKey redis-out-key)
+  (BxlDirect/setRedisOut redis-out?))
 
 (defn start-time!
   []
@@ -112,9 +118,17 @@
     (.close conn)
     count))
 
+(defn continue
+  [conn users updates next]
+  (t/reset!)
+  (reset! max-directions [])
+  (clear-queue conn)
+  (clear-out-queue!)
+  (when next
+    ((first next) conn users updates (rest next))))
+
 (defn test5
   [conn users updates next]
-  (reset! max-directions [])
   (BxlDirect/spawnMessages conn users updates)
   (BxlDirect/start)
   (start-time!)
@@ -122,17 +136,19 @@
     conn
     (fn []
       (let [t (stop-time!)]
+        (BxlDirect/stop)
         (println "Done test 5 in" t)
         (println)
-        (println (count @max-directions) "elements in max-directions")
-        (BxlDirect/stop)
-        (when next
-          ((first next) conn users updates (rest next)))))))
+        (if redis-out?
+          (println (out-queue-count) "elements in out-queue")
+          ;(println (count @max-directions) "elements in max-directions")
+          (println @max-directions)
+          )
+
+        (continue conn users updates next)))))
 
 (defn test4
   [conn users updates next]
-  (reset! max-directions [])
-  (t/reset!)
   (swap! cfg/config assoc :throttle @throttle-time)
   (swap! cfg/config assoc :runtime :spark)
   (push-messages conn users updates)
@@ -145,20 +161,19 @@
       (let [t (stop-time!)]
         (println "Done test 4 in" t)
         (println)
-        (println (count @max-directions) "elements in max-directions")
+        (if redis-out?
+          (println (out-queue-count) "elements in out-queue")
+          (println (count @max-directions) "elements in max-directions"))
         (println "Collect time:" (do (await spark/collect-times) @spark/collect-times))
         (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
         (t/stop!)
         (send spark/collect-times (fn [& args] 0))
         (send spark/parallelize-times (fn [& args] 0))
-        (when next
-          ((first next) conn users updates (rest next))))))
+        (continue conn users updates next))))
   (println "Started test 4"))
 
 (defn test3
   [conn users updates next]
-  (reset! max-directions [])
-  (t/reset!)
   (swap! cfg/config assoc :throttle false)
   (swap! cfg/config assoc :runtime :spark)
   (push-messages conn users updates)
@@ -169,18 +184,17 @@
     conn
     (fn []
       (let [t (stop-time!)]
+        (t/stop!)
         (println "Done test 3 in" t)
         (println)
-        (println (count @max-directions) "elements in max-directions")
-        (t/stop!)
-        (when next
-          ((first next) conn users updates (rest next))))))
+        (if redis-out?
+          (println (out-queue-count) "elements in out-queue")
+          (println (count @max-directions) "elements in max-directions"))
+        (continue conn users updates next))))
   (println "Started test 3"))
 
 (defn test2
   [conn users updates next]
-  (reset! max-directions [])
-  (t/reset!)
   (swap! cfg/config assoc :throttle @throttle-time)
   (push-messages conn users updates)
   (create-graph)
@@ -190,17 +204,17 @@
     conn
     (fn []
       (let [t (stop-time!)]
+        (t/stop!)
         (println "Done test 2 in" t)
         (println)
-        (println (count @max-directions) "elements in max-directions")
-        (t/stop!)
-        (when next
-          ((first next) conn users updates (rest next))))))
+        (if redis-out?
+          (println (out-queue-count) "elements in out-queue")
+          (println (count @max-directions) "elements in max-directions"))
+        (continue conn users updates next))))
   (println "Started test 2"))
 
 (defn test1
   [conn users updates next]
-  (clear-queue conn)
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
@@ -209,12 +223,13 @@
     conn
     (fn []
       (let [t (stop-time!)]
+        (t/stop!)
         (println "Done test 1 in" t)
         (println)
-        (println (count @max-directions) "elements in max-directions")
-        (t/stop!)
-        (when next
-          ((first next) conn users updates (rest next))))))
+        (if redis-out?
+          (println (out-queue-count) "elements in out-queue")
+          (println (count @max-directions) "elements in max-directions"))
+        (continue conn users updates next))))
   (println "Started test 1"))
 
 (defn stopper

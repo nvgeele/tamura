@@ -44,7 +44,9 @@ public class BxlDirect {
 
     static private int duration = 1000;
 
-    static Jedis outConn;
+    static private Jedis outConn;
+
+    static private boolean redisOut = true;
 
     public static void setCheckpointDir(String x) {
         checkpointDir = x;
@@ -69,6 +71,11 @@ public class BxlDirect {
 
     public static void setDuration(int d) {
         duration = d;
+    }
+
+    public static void setRedisOut(boolean b)
+    {
+        redisOut = b;
     }
 
     public static void spawnMessages(Jedis conn, int users, int updates) {
@@ -171,8 +178,21 @@ public class BxlDirect {
         }).foreachRDD(new VoidFunction2<JavaRDD<Tuple2<Point.Direction, Long>>, Time>() {
             @Override
             public void call(JavaRDD<Tuple2<Point.Direction, Long>> tuple2JavaRDD, Time time) throws Exception {
-//                BxlHelper.append(tuple2JavaRDD);
-                outConn.rpush(OUT_QUEUE, tuple2JavaRDD.toString());
+                String out;
+                List<Tuple2<Point.Direction, Long>> l = tuple2JavaRDD.collect();
+
+                if(l.size() != 0) {
+                    Tuple2<Point.Direction, Long> t = l.get(0);
+                    out = t.toString();
+                } else {
+                    out = "None";
+                }
+
+                if(redisOut) {
+                    outConn.rpush(OUT_QUEUE, out);
+                } else {
+                    BxlHelper.append(out);
+                }
             }
         });
     }
