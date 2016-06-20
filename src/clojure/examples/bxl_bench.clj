@@ -16,6 +16,11 @@
 (def redis-out-key "bxlout")
 (def throttle-time (atom 1000))
 
+(def redis-out?
+  ;true
+  false
+  )
+
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
   (let [y (* (Math/sin (- cur_lon pre_lon)) (Math/cos cur_lat))
@@ -45,14 +50,9 @@
                                 [d2 c2] t2]
                             (if (> c1 c2) t1 t2)))))]
     ;(t/print r)
-    ;(t/do-apply (comp -append first) r)
-    (t/redis-out r redis-host redis-out-key)
-    ))
-
-(def redis-out?
-  ;true
-  false
-  )
+    (if redis-out?
+      (t/redis-out r redis-host redis-out-key)
+      (t/do-apply (comp -append first) r))))
 
 ;;;;;;;;;;;;;;;
 
