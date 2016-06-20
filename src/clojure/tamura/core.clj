@@ -246,7 +246,7 @@
   [source f]
   (assert*
     (signal? source) "argument to map-by-key should be a signal"
-    (= (:return-type (get-node (signal-value source))) :multiset) "input for map-by-key must be a hash")
+    (= (:return-type (get-node (signal-value source))) :hash) "input for map-by-key must be a hash")
   (make-signal (register-node! nt/map-by-key :hash [f] [(signal-value source)])))
 
 ;; NOTE: Because multisets have no order, the function must be both commutative and associative
