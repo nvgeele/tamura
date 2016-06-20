@@ -129,7 +129,11 @@
         (println "Done test 4 in" t)
         (println)
         (println (count @max-directions) "elements in max-directions")
+        (println "Collect time:" (do (await spark/collect-times) @spark/collect-times))
+        (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
         (t/stop!)
+        (send spark/collect-times (fn [& args] 0))
+        (send spark/parallelize-times (fn [& args] 0))
         (when next
           ((first next) conn users updates (rest next))))))
   (println "Started test 4"))

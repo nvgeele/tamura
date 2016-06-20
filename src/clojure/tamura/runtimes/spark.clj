@@ -7,6 +7,8 @@
             [multiset.core :as ms]
             [tamura.config :as cfg]
             [tamura.node-types :as nt]
+    ;; TODO: remove profiling
+            [tamura.profile :as profile]
             [flambo.conf :as conf]
             [flambo.api :as f]
             [flambo.tuple :as ft]
@@ -156,6 +158,25 @@
     :multiset (collect-multiset rdd)
     :hash (collect-hash rdd)
     :else (throw (Exception. "collect: unsupported type"))))
+
+;;;; TEMPORARY ;;;;
+;; TODO: Remove
+
+(def parallelize-times (agent 0))
+(def collect-times (agent 0))
+
+(defn parallelize-profile-fn
+  [time]
+  (send parallelize-times + time))
+
+(defn collect-profile-fn
+  [time]
+  (send collect-times + time))
+
+(profile/profile parallelize parallelize-profile-fn)
+
+(profile/profile collect-hash* collect-profile-fn)
+(profile/profile collect-multiset* collect-profile-fn)
 
 ;;;; SPARK CLASSES AND FUNCTIONS ;;;;
 
