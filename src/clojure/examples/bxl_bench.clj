@@ -19,6 +19,7 @@
 (def redis-out-key "bxlout")
 (def throttle-time (atom 1000))
 (def num-tests 10)
+(def spark-master "*")
 
 (def redis-out? false)
 
@@ -290,7 +291,7 @@
   (println "Total messages:" (* users updates))
   (println "Redis output:" redis-out?)
   (println "Throttle time:" @throttle-time)
-  (println "Spark master:" (cfg/spark-master))
+  (println "Spark master:" spark-master)
   (println "Number of tests:" num-tests)
   (let [results (map (fn [[k times]]
                        {:test    k
@@ -322,6 +323,7 @@
         throttle (if throttle (read-string throttle) 1000)]
     (alter-var-root (var redis-out?) (constantly (if (read-string redis-output?) true false)))
     (alter-var-root (var num-tests) (constantly (read-string ntests)))
+    (alter-var-root (var spark-master) (constantly (str "local[" cores "]")))
     (reset! throttle-time throttle)
     (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
     (spark/setup-spark!)
