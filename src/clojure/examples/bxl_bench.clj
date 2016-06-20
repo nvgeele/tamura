@@ -2,6 +2,7 @@
   (:require [tamura.config :as cfg]
             [tamura.core :as t]
             [tamura.node :as n]
+            [tamura.profile :as profile]
             [tamura.runtimes.spark :as spark]
             [clj-time.core :as time]
             [clj-time.format :as f])
@@ -16,10 +17,7 @@
 (def redis-out-key "bxlout")
 (def throttle-time (atom 1000))
 
-(def redis-out?
-  ;true
-  false
-  )
+(def redis-out? false)
 
 (defn calculate-direction
   [[cur_lat cur_lon] [pre_lat pre_lon]]
@@ -35,24 +33,25 @@
 
 (defn create-graph
   []
-  (let [r (-> (t/redis redis-host redis-key :key :user-id :buffer 2)
-              (t/filter-key-size 2)
-              (t/reduce-by-key #(let [t1 (f/parse (:time %1))
-                                      t2 (f/parse (:time %2))]
-                                 (if (time/before? t1 t2)
-                                   (calculate-direction (:position %2) (:position %1))
-                                   (calculate-direction (:position %1) (:position %2)))))
-              (t/hash-to-multiset)
-              (t/map second)
-              (t/multiplicities)
-              (t/reduce (fn [t1 t2]
-                          (let [[d1 c1] t1
-                                [d2 c2] t2]
-                            (if (> c1 c2) t1 t2)))))]
-    ;(t/print r)
+  (let [redis-input (t/redis redis-host redis-key :key :user-id :buffer 2)
+        out (-> redis-input
+                (t/filter-key-size  2)
+                (t/reduce-by-key #(let [t1 (f/parse (:time %1))
+                                        t2 (f/parse (:time %2))]
+                                   (if (time/before? t1 t2)
+                                     (calculate-direction (:position %2) (:position %1))
+                                     (calculate-direction (:position %1) (:position %2)))))
+                (t/hash-to-multiset)
+                (t/map second)
+                (t/multiplicities)
+                (t/reduce (fn [t1 t2]
+                            (let [[d1 c1] t1
+                                  [d2 c2] t2]
+                              (if (> c1 c2) t1 t2)))))]
+    ;(t/print out)
     (if redis-out?
-      (t/redis-out r redis-host redis-out-key)
-      (t/do-apply (comp -append first) r))))
+      (t/redis-out out redis-host redis-out-key)
+      (t/do-apply (comp -append first) out))))
 
 ;;;;;;;;;;;;;;;
 
@@ -159,16 +158,17 @@
     conn
     (fn []
       (let [t (stop-time!)]
+        (t/stop!)
         (println "Done test 4 in" t)
         (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
-        (println "Collect time:" (do (await spark/collect-times) @spark/collect-times))
-        (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
-        (t/stop!)
-        (send spark/collect-times (fn [& args] 0))
-        (send spark/parallelize-times (fn [& args] 0))
+        (when profile/profile?
+          (println "Collect time:" (do (await spark/collect-times) @spark/collect-times))
+          (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
+          (send spark/collect-times (fn [& args] 0))
+          (send spark/parallelize-times (fn [& args] 0)))
         (continue conn users updates next))))
   (println "Started test 4"))
 
@@ -190,6 +190,11 @@
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
+        (when profile/profile?
+          (println "Collect time:" (do (await spark/collect-times) @spark/collect-times))
+          (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
+          (send spark/collect-times (fn [& args] 0))
+          (send spark/parallelize-times (fn [& args] 0)))
         (continue conn users updates next))))
   (println "Started test 3"))
 
@@ -242,13 +247,14 @@
   (apply (first tests) [conn users updates (concat (rest tests) [stopper])]))
 
 (defn -main
-  [users updates & [cores throttle]]
+  [users updates & [cores throttle redis-output?]]
   (let [users (read-string users)
         updates (read-string updates)
         conn (Jedis. redis-host)
         cores (if cores (read-string cores) 0)
         cores (if (= cores 0) "*" cores)
         throttle (if throttle (read-string throttle) 1000)]
+    (alter-var-root (var redis-out?) (constantly (if (read-string redis-output?) true false)))
     (reset! throttle-time throttle)
     (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
     (spark/setup-spark!)
@@ -256,6 +262,12 @@
     (println "Starting tests...")
     ;(push-messages conn users updates)
     (do-tests conn users updates
-              [test2 test2 test2 test2 test2
-               test4 test4 test4 test4 test4
-               test5 test5 test5 test5 test5])))
+              [
+               ;test2 test2 test2 test2 test2
+               ;test4 test4 test4 test4 test4
+               ;test5 test5 test5 test5 test5
+               ;test2 test2
+               test4 test4
+               test5 test5
+               ;test6 test6
+               ])))
