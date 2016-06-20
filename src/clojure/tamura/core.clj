@@ -167,6 +167,12 @@
   (let [k print*]
     `(~k ~input-form (quote ~input-form))))
 
+(core/defn redis-out
+  [source host key & {:keys [flatten?] :or {flatten? false}}]
+  (assert*
+    (signal? source) "argument to redis-out must be a signal")
+  (make-signal (register-sink! nt/redis-out [host key flatten?] [(signal-value source)])))
+
 ;;;;     MULTISET OPERATIONS     ;;;;
 
 ;; TODO: like reduce, make it work for regular collections too

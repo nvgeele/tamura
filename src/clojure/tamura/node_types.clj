@@ -28,6 +28,7 @@
 (defnode-type do-apply)
 (defnode-type throttle)
 (defnode-type print)
+(defnode-type redis-out)
 
 ;;;;     MULTISET OPERATIONS     ;;;;
 

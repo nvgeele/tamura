@@ -5,15 +5,26 @@
   (:gen-class))
 
 ;; TODO: test buffer diff-add and so on
+
+;; TODO: test redis throttling and non-throttling
+
 (defn -main
   [& args]
-  (let [r (t/redis "localhost" "q1" :buffer 5)]
-    (t/print r)
-    ;(t/print (t/diff-add r))
-    ;(t/print (t/diff-remove r))
 
-    ;(swap! cfg/config assoc :throttle 2000)
-    (swap! cfg/config assoc :runtime :spark)
+  ;(swap! cfg/config assoc :throttle 1000)
+  ;(swap! cfg/config assoc :runtime :spark)
 
-    (t/start!)
-    (println "Ready!")))
+  #_(let [r (t/redis "localhost" "q1" :buffer 5)
+        m (t/map r inc)]
+    (t/print m)
+    (t/redis-out m "localhost" "o1" :flatten? false)
+    (t/redis-out m "localhost" "o2" :flatten? true))
+
+  (let [r (t/redis "localhost" "q2" :key :id)
+        m (t/map-by-key r (comp inc :v))]
+    (t/print m)
+    (t/redis-out m "localhost" "o1" :flatten? false)
+    (t/redis-out m "localhost" "o2" :flatten? true))
+
+  (t/start!)
+  (println "Ready!"))

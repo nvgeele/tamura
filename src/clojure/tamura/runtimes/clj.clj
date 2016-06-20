@@ -261,6 +261,28 @@
     (make-sink id nt/print)))
 (register-constructor! this-runtime nt/print make-print-node)
 
+(defn make-redis-out-node
+  [id [host key flatten?] [input-node]]
+  (let [input (subscribe-input input-node)
+        conn (Jedis. host)
+        hash? (= (:return-type input-node) :hash)
+        selector (if (= (:return-type input-node) :hash) to-hash to-multiset)]
+    (go-loop [msg (<! input)]
+      (log/debug (str "redis-out node " id " has received: " msg))
+      (when (:changed? msg)
+        (let [data (selector (:value msg))
+              array (if flatten?
+                      (if hash?
+                        (for [[k ms] data
+                              v ms]
+                          (pr-str [k v]))
+                        (for [v data] (pr-str v)))
+                      [(pr-str data)])]
+          (.rpush conn key (into-array String array))))
+      (recur (<! input)))
+    (make-sink id nt/redis-out)))
+(register-constructor! this-runtime nt/redis-out make-redis-out-node)
+
 ;;;;     MULTISET OPERATIONS     ;;;;
 
 (defn make-map-node
