@@ -55,19 +55,19 @@
             (conf/app-name (cfg/spark-app-name))
             (conf/master (cfg/spark-master))
             (f/spark-context)))))
-  (when (cfg/throttle?)
+  (when (and (cfg/throttle?) (cfg/spark-enable-stream-receivers))
     (setup-streaming-context!)))
 
 (defn start-spark!
   []
-  (when (cfg/throttle?)
+  (when (and (cfg/throttle?) (cfg/spark-enable-stream-receivers))
     ;; TODO: do we really need a checkpoint dir?
     (.checkpoint ssc (cfg/spark-checkpoint-dir))
     (.start ssc)))
 
 (defn stop-spark!
   []
-  (when (cfg/throttle?)
+  (when (and (cfg/throttle?) (cfg/spark-enable-stream-receivers))
     (.stop ssc false)))
 
 ;;;; HELPERS ;;;;
@@ -457,7 +457,7 @@
 ;; - foreachRDD collect, and push all
 (defn make-redis-node
   [id [return-type host queue key buffer timeout] []]
-  (if (cfg/throttle?)
+  (if (and (cfg/throttle?) (cfg/spark-enable-stream-receivers))
     (let [source-node (make-source-node id [return-type :timeout timeout :buffer buffer] [])
           redis-input (.receiverStream ssc (RedisReceiver. host queue))]
       ;; TODO: helper class
