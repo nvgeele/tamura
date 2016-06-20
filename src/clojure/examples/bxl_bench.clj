@@ -13,6 +13,7 @@
 ;(def redis-host "134.184.49.17")
 (def redis-host "localhost")
 (def redis-key "bxlqueue")
+(def redis-out-key "bxlout")
 (def throttle-time (atom 1000))
 
 (defn calculate-direction
@@ -44,7 +45,9 @@
                                 [d2 c2] t2]
                             (if (> c1 c2) t1 t2)))))]
     ;(t/print r)
-    (t/do-apply (comp -append first) r)))
+    ;(t/do-apply (comp -append first) r)
+    (t/redis-out r redis-host redis-out-key)
+    ))
 
 ;;;;;;;;;;;;;;;
 
@@ -85,7 +88,8 @@
   (BxlDirect/setCheckpointDir "/tmp/checkpoint")
   (BxlDirect/setRedisHost redis-host)
   (BxlDirect/setRedisKey redis-key)
-  (BxlDirect/setDuration @throttle-time))
+  (BxlDirect/setDuration @throttle-time)
+  (BxlDirect/setRedisOutKey redis-out-key))
 
 (defn start-time!
   []
@@ -94,6 +98,19 @@
 (defn stop-time!
   []
   (/ (double (- (System/nanoTime) @start-time)) 1000000.0))
+
+(defn clear-out-queue!
+  []
+  (let [conn (Jedis. redis-host)]
+    (.del conn redis-out-key)
+    (.close conn)))
+
+(defn out-queue-count
+  []
+  (let [conn (Jedis. redis-host)
+        count (.llen conn redis-out-key)]
+    (.close conn)
+    count))
 
 (defn test5
   [conn users updates next]
