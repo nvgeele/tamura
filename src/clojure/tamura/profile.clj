@@ -1,6 +1,6 @@
 (ns tamura.profile)
 
-(def profile? true)
+(def profile? false)
 
 (defn make-wrapped
   [f time-f]

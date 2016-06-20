@@ -287,7 +287,7 @@
     (let [avg (mean times)
           dev (standard-deviation times)]
       ((comp println str)
-        "Test `" k "' average time: " avg "±" dev)))
+        "Test `" k "' average time: " avg " ± " dev)))
   (System/exit 0))
 
 (defn do-tests
@@ -310,7 +310,7 @@
         cores (if cores (read-string cores) 0)
         cores (if (= cores 0) "*" cores)
         throttle (if throttle (read-string throttle) 1000)
-        tests [0 0 0 5 0 0]]
+        tests [0 10 0 10 10 10]]
     (alter-var-root (var redis-out?) (constantly (if (read-string redis-output?) true false)))
     (reset! throttle-time throttle)
     (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
