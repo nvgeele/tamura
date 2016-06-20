@@ -34,6 +34,7 @@ import java.util.List;
 public class BxlDirect {
     static private int NUM_THREADS = 10;
     static public String QUEUE;
+    static public String OUT_QUEUE;
 
     static private long start_time;
 
@@ -42,6 +43,8 @@ public class BxlDirect {
     static private JavaStreamingContext ssc;
 
     static private int duration = 1000;
+
+    static Jedis outConn;
 
     public static void setCheckpointDir(String x) {
         checkpointDir = x;
@@ -57,6 +60,11 @@ public class BxlDirect {
 
     public static void setRedisKey(String key) {
         QUEUE = key;
+    }
+
+    public static void setRedisOutKey(String key)
+    {
+        OUT_QUEUE = key;
     }
 
     public static void setDuration(int d) {
@@ -163,7 +171,8 @@ public class BxlDirect {
         }).foreachRDD(new VoidFunction2<JavaRDD<Tuple2<Point.Direction, Long>>, Time>() {
             @Override
             public void call(JavaRDD<Tuple2<Point.Direction, Long>> tuple2JavaRDD, Time time) throws Exception {
-                BxlHelper.append(tuple2JavaRDD);
+//                BxlHelper.append(tuple2JavaRDD);
+                outConn.rpush(OUT_QUEUE, tuple2JavaRDD.toString());
             }
         });
     }
@@ -176,11 +185,13 @@ public class BxlDirect {
     public static void start() {
         setupStreamingContext();
         createGraph();
+        outConn = new Jedis(RedisConfig.getRedisHost());
         ssc.start();
     }
 
     public static void stop() {
         ssc.stop(false);
+        outConn.close();
     }
 
     public static void main(String[] args) {
