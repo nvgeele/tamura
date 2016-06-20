@@ -18,6 +18,7 @@
 (def redis-key "bxlqueue")
 (def redis-out-key "bxlout")
 (def throttle-time (atom 1000))
+(def num-tests 10)
 
 (def redis-out? false)
 
@@ -290,42 +291,42 @@
   (println "Redis output:" redis-out?)
   (println "Throttle time:" @throttle-time)
   (println "Spark master:" (cfg/spark-master))
-  (println)
+  (println "Number of tests:" num-tests)
   (let [results (map (fn [[k times]]
                        {:test    k
                         :avg     (format "%.2f" (mean times))
                         :std-dev (format "%.2f" (standard-deviation times))})
                      @times)]
     (pprint/print-table results))
-  (println "-------------------------")
   (System/exit 0))
 
 (defn do-tests
   [conn users updates tests]
   (apply (first tests) [conn users updates (concat (rest tests) [report])]))
 
-(def test-fns
-  [clj-runtime-no-throttle
-   clj-runtime-throttled
-   spark-runtime-no-throttle
-   spark-runtime-throttled
-   spark-runtime-throttled-receivers
-   pure-spark-streaming])
+(def tests
+  {clj-runtime-no-throttle            false
+   clj-runtime-throttled              true
+   spark-runtime-no-throttle          false
+   spark-runtime-throttled            true
+   spark-runtime-throttled-receivers  true
+   pure-spark-streaming               true})
 
 (defn -main
-  [users updates & [cores throttle redis-output?]]
+  [users updates & [cores throttle ntests redis-output?]]
   (let [users (read-string users)
         updates (read-string updates)
         conn (Jedis. redis-host)
         cores (if cores (read-string cores) 0)
         cores (if (= cores 0) "*" cores)
-        throttle (if throttle (read-string throttle) 1000)
-        tests [0 10 0 10 10 10]]
+        throttle (if throttle (read-string throttle) 1000)]
     (alter-var-root (var redis-out?) (constantly (if (read-string redis-output?) true false)))
+    (alter-var-root (var num-tests) (constantly (read-string ntests)))
     (reset! throttle-time throttle)
     (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
     (spark/setup-spark!)
     (setup-java!)
     (println "Starting tests...")
-    (do-tests conn users updates
-              (mapcat #(repeat %2 (get test-fns %1)) (range 0 (count test-fns)) tests))))
+    (do-tests conn users updates (mapcat (fn [[test-fn do-test?]]
+                                           (if do-test? (repeat num-tests test-fn) nil))
+                                         tests))))
