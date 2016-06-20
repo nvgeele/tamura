@@ -123,10 +123,11 @@
   (reset! max-directions [])
   (clear-queue conn)
   (clear-out-queue!)
+  (cfg/reset-config!)
   (when next
     ((first next) conn users updates (rest next))))
 
-(defn test5
+(defn pure-spark-streaming
   [conn users updates next]
   (BxlDirect/spawnMessages conn users updates)
   (BxlDirect/start)
@@ -136,20 +137,19 @@
     (fn []
       (let [t (stop-time!)]
         (BxlDirect/stop)
-        (println "Done test 5 in" t)
+        (println "Done test pure-spark-streaming in" t)
         (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
-          ;(println (count @max-directions) "elements in max-directions")
-          (println @max-directions)
-          )
+          (println (count @max-directions) "elements in max-directions"))
+        (continue conn users updates next))))
+  (println "Started test pure-spark-streaming"))
 
-        (continue conn users updates next)))))
-
-(defn test4
+(defn spark-runtime-throttled-receivers
   [conn users updates next]
-  (swap! cfg/config assoc :throttle @throttle-time)
-  (swap! cfg/config assoc :runtime :spark)
+  (cfg/set-runtime! :spark)
+  (cfg/set-throttle! @throttle-time)
+  (cfg/set-spark-enable-stream-receivers! true)
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
@@ -159,7 +159,7 @@
     (fn []
       (let [t (stop-time!)]
         (t/stop!)
-        (println "Done test 4 in" t)
+        (println "Done test spark-runtime-throttled-receivers in" t)
         (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
@@ -170,12 +170,12 @@
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
         (continue conn users updates next))))
-  (println "Started test 4"))
+  (println "Started test spark-runtime-throttled-receivers"))
 
-(defn test3
+(defn spark-runtime-throttled
   [conn users updates next]
-  (swap! cfg/config assoc :throttle false)
-  (swap! cfg/config assoc :runtime :spark)
+  (cfg/set-runtime! :spark)
+  (cfg/set-throttle! @throttle-time)
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
@@ -185,7 +185,7 @@
     (fn []
       (let [t (stop-time!)]
         (t/stop!)
-        (println "Done test 3 in" t)
+        (println "Done test spark-runtime-throttled in" t)
         (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
@@ -196,11 +196,12 @@
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
         (continue conn users updates next))))
-  (println "Started test 3"))
+  (println "Started test spark-runtime-throttled"))
 
-(defn test2
+(defn spark-runtime-no-throttle
   [conn users updates next]
-  (swap! cfg/config assoc :throttle @throttle-time)
+  (cfg/set-runtime! :spark)
+  (cfg/set-throttle! false)
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
@@ -210,16 +211,23 @@
     (fn []
       (let [t (stop-time!)]
         (t/stop!)
-        (println "Done test 2 in" t)
+        (println "Done test spark-runtime-no-throttle in" t)
         (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
+        (when profile/profile?
+          (println "Collect time:" (do (await spark/collect-times) @spark/collect-times))
+          (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
+          (send spark/collect-times (fn [& args] 0))
+          (send spark/parallelize-times (fn [& args] 0)))
         (continue conn users updates next))))
-  (println "Started test 2"))
+  (println "Started test spark-runtime-no-throttle"))
 
-(defn test1
+(defn clj-runtime-throttled
   [conn users updates next]
+  (cfg/set-runtime! :clj)
+  (cfg/set-throttle! @throttle-time)
   (push-messages conn users updates)
   (create-graph)
   (t/start!)
@@ -229,13 +237,34 @@
     (fn []
       (let [t (stop-time!)]
         (t/stop!)
-        (println "Done test 1 in" t)
+        (println "Done test clj-runtime-throttled in" t)
         (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
         (continue conn users updates next))))
-  (println "Started test 1"))
+  (println "Started test clj-runtime-throttled"))
+
+(defn clj-runtime-no-throttle
+  [conn users updates next]
+  (cfg/set-runtime! :clj)
+  (cfg/set-throttle! false)
+  (push-messages conn users updates)
+  (create-graph)
+  (t/start!)
+  (start-time!)
+  (create-poll-thread
+    conn
+    (fn []
+      (let [t (stop-time!)]
+        (t/stop!)
+        (println "Done test clj-runtime-no-throttle in" t)
+        (println)
+        (if redis-out?
+          (println (out-queue-count) "elements in out-queue")
+          (println (count @max-directions) "elements in max-directions"))
+        (continue conn users updates next))))
+  (println "Started test clj-runtime-no-throttle"))
 
 (defn stopper
   [& args]
@@ -246,6 +275,14 @@
   [conn users updates tests]
   (apply (first tests) [conn users updates (concat (rest tests) [stopper])]))
 
+(def test-fns
+  [clj-runtime-no-throttle
+   clj-runtime-throttled
+   spark-runtime-no-throttle
+   spark-runtime-throttled
+   spark-runtime-throttled-receivers
+   pure-spark-streaming])
+
 (defn -main
   [users updates & [cores throttle redis-output?]]
   (let [users (read-string users)
@@ -253,21 +290,13 @@
         conn (Jedis. redis-host)
         cores (if cores (read-string cores) 0)
         cores (if (= cores 0) "*" cores)
-        throttle (if throttle (read-string throttle) 1000)]
+        throttle (if throttle (read-string throttle) 1000)
+        tests [0 0 0 2 2 2]]
     (alter-var-root (var redis-out?) (constantly (if (read-string redis-output?) true false)))
     (reset! throttle-time throttle)
     (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
     (spark/setup-spark!)
     (setup-java!)
     (println "Starting tests...")
-    ;(push-messages conn users updates)
     (do-tests conn users updates
-              [
-               ;test2 test2 test2 test2 test2
-               ;test4 test4 test4 test4 test4
-               ;test5 test5 test5 test5 test5
-               ;test2 test2
-               test4 test4
-               test5 test5
-               ;test6 test6
-               ])))
+              (mapcat #(repeat %2 (get test-fns %1)) (range 0 (count test-fns)) tests))))
