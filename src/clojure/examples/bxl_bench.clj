@@ -370,6 +370,8 @@
         cores (if cores (read-string cores) 0)
         cores (if (= cores 0) "*" cores)
         throttle (if throttle (read-string throttle) 1000)]
+    (.del conn redis-out-key)
+    (.del conn redis-key)
     (alter-var-root (var redis-out?) (constantly (if (read-string redis-output?) true false)))
     (alter-var-root (var num-tests) (constantly (read-string ntests)))
     (alter-var-root (var spark-master) (constantly (str "local[" cores "]")))
