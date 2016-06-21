@@ -157,11 +157,12 @@
                       (if-let [in (.lindex conn redis-out-key -1)]
                         (first (read-string in))
                         nil)
-                      (last @max-directions))]
-    (when-not (or (= (first last-result)
-                     (first @control))
-                  (= (second last-result)
-                     (second @control)))
+                      (last @max-directions))
+        alpha (= (first last-result) (first @control))
+        beta (= (second last-result) (second @control))]
+    ;(println "last-result:" last-result)
+    ;(println "control:" @control)
+    (when-not (or (and alpha beta) beta)
       (println "***ERROR***")
       (println "Mismatch between result and control:" last-result "/" @control)
       (println "***ERROR***"))))
@@ -187,11 +188,11 @@
       (let [t (stop-time! :pure-spark-streaming)]
         (BxlDirect/stop)
         (println "Done test pure-spark-streaming in" t)
-        (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
         (do-check conn)
+        (println)
         (continue conn users updates next))))
   (println "Started test pure-spark-streaming"))
 
@@ -210,7 +211,6 @@
       (let [t (stop-time! :spark-runtime-throttled-receivers)]
         (t/stop!)
         (println "Done test spark-runtime-throttled-receivers in" t)
-        (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
@@ -220,6 +220,7 @@
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
         (do-check conn)
+        (println)
         (continue conn users updates next))))
   (println "Started test spark-runtime-throttled-receivers"))
 
@@ -237,7 +238,6 @@
       (let [t (stop-time! :spark-runtime-throttled)]
         (t/stop!)
         (println "Done test spark-runtime-throttled in" t)
-        (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
@@ -247,6 +247,7 @@
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
         (do-check conn)
+        (println)
         (continue conn users updates next))))
   (println "Started test spark-runtime-throttled"))
 
@@ -264,7 +265,6 @@
       (let [t (stop-time! :spark-runtime-no-throttle)]
         (t/stop!)
         (println "Done test spark-runtime-no-throttle in" t)
-        (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
@@ -274,6 +274,7 @@
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
         (do-check conn)
+        (println)
         (continue conn users updates next))))
   (println "Started test spark-runtime-no-throttle"))
 
@@ -291,11 +292,11 @@
       (let [t (stop-time! :clj-runtime-throttled)]
         (t/stop!)
         (println "Done test clj-runtime-throttled in" t)
-        (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
         (do-check conn)
+        (println)
         (continue conn users updates next))))
   (println "Started test clj-runtime-throttled"))
 
@@ -313,11 +314,11 @@
       (let [t (stop-time! :clj-runtime-no-throttle)]
         (t/stop!)
         (println "Done test clj-runtime-no-throttle in" t)
-        (println)
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
         (do-check conn)
+        (println)
         (continue conn users updates next))))
   (println "Started test clj-runtime-no-throttle"))
 

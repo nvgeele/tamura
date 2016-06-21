@@ -183,9 +183,9 @@ public class BxlDirect {
 
                 if(l.size() != 0) {
                     Tuple2<Point.Direction, Long> t = l.get(0);
-                    out = t.toString();
+                    out = "#{[:" + t._1().toString().toLowerCase() + " " + String.valueOf(t._2()) + "]}";
                 } else {
-                    out = "None";
+                    out = "nil";
                 }
 
                 if(redisOut) {

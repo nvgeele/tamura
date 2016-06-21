@@ -43,11 +43,11 @@ public class Point implements Serializable {
 
         double deg = (bearing*(180.0/Math.PI) + 360) % 360;
 
-        if((deg >= 315) && (deg <= 45)) {
+        if((deg >= 315.) && (deg <= 45.)) {
             return Direction.EAST;
-        } else if((deg >= 45) && (deg <= 135)) {
+        } else if((deg >= 45.) && (deg <= 135.)) {
             return Direction.NORTH;
-        } else if((deg >= 135) && (deg <= 225)) {
+        } else if((deg >= 135.) && (deg <= 225.)) {
             return Direction.WEST;
         } else {
             return Direction.SOUTH;
