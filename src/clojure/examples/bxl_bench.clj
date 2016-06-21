@@ -6,6 +6,7 @@
             [tamura.runtimes.spark :as spark]
             [clj-time.core :as time]
             [clj-time.format :as f]
+            [clojure.edn :as edn]
             [clojure.pprint :as pprint])
   (:import [redis.clients.jedis Jedis]
            [examples.bxldirect BxlDirect]
@@ -20,6 +21,8 @@
 (def throttle-time (atom 1000))
 (def num-tests 10)
 (def spark-master "*")
+
+(def wait-time 100)
 
 (def redis-out? false)
 
@@ -58,30 +61,54 @@
       (t/do-apply (comp -append first) out))))
 
 ;;;;;;;;;;;;;;;
+(def messages (atom []))
+(def control (atom nil))
+
+(defn generate-messages!
+  [users updates]
+  (let [start-time (time/now)
+        msgs (for [n (range 0 updates)
+                     id (range 0 users)]
+               (str {:user-id  id
+                     :position [(Math/random) (Math/random)]
+                     :time     (str (time/plus start-time (time/seconds n)))}))]
+    (reset! messages msgs))
+  (println "Generated messages!"))
 
 (defn push-messages
   [conn users updates]
-  (let [user-ids (range 0 users)
-        start-time (time/now)]
-    (dotimes [n updates]
-      (doseq [id user-ids]
-        (let [t (time/plus start-time (time/seconds n))]
-          (.rpush conn
-                  redis-key
-                  (into-array String [(str {:user-id  id
-                                            :position [(Math/random) (Math/random)]
-                                            :time     (str t)})])))))
-    (println "Pushed messages!")))
+  (doseq [m @messages]
+    (.rpush conn redis-key (into-array String [m])))
+  (println "Pushed messages!"))
+
+(defn calculate-control!
+  [users updates]
+  (reset! control (->> (map edn/read-string (take-last (* users 2) @messages))
+                       (reduce #(update %1 (:user-id %2) conj %2) {})
+                       (reduce-kv (fn [h k [v1 v2]]
+                                    (assoc h
+                                      k (let [t1 (f/parse (:time v1))
+                                              t2 (f/parse (:time v2))]
+                                          (if (time/before? t1 t2)
+                                            (calculate-direction (:position v2) (:position v1))
+                                            (calculate-direction (:position v1) (:position v2))))))
+                                  {})
+                       (vals)
+                       (reduce #(assoc %1 %2 (inc (%1 %2 0))) {})
+                       (reduce #(let [[d1 c1] %1
+                                      [d2 c2] %2]
+                                 (if (> c1 c2) %1 %2))))))
 
 (defn create-poll-thread
   [conn continuation]
   (doto (Thread. (fn []
                    (loop []
+                     ;(Thread/sleep wait-time)
+                     ;(Thread/sleep @throttle-time)
+                     (Thread/sleep (* 2 @throttle-time))
                      (if (= (.llen conn redis-key) 0)
                        (continuation)
-                       (do
-                         (Thread/sleep 100)
-                         (recur))))))
+                       (recur)))))
     (.start)))
 
 (defn clear-queue
@@ -124,6 +151,21 @@
     (swap! times update key conj t)
     t))
 
+(defn do-check
+  [conn]
+  (let [last-result (if redis-out?
+                      (if-let [in (.lindex conn redis-out-key -1)]
+                        (first (read-string in))
+                        nil)
+                      (last @max-directions))]
+    (when-not (or (= (first last-result)
+                     (first @control))
+                  (= (second last-result)
+                     (second @control)))
+      (println "***ERROR***")
+      (println "Mismatch between result and control:" last-result "/" @control)
+      (println "***ERROR***"))))
+
 (defn continue
   [conn users updates next]
   (t/reset!)
@@ -149,6 +191,7 @@
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
+        (do-check conn)
         (continue conn users updates next))))
   (println "Started test pure-spark-streaming"))
 
@@ -176,6 +219,7 @@
           (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
+        (do-check conn)
         (continue conn users updates next))))
   (println "Started test spark-runtime-throttled-receivers"))
 
@@ -202,6 +246,7 @@
           (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
+        (do-check conn)
         (continue conn users updates next))))
   (println "Started test spark-runtime-throttled"))
 
@@ -228,6 +273,7 @@
           (println "Parallelize time:" (do (await spark/parallelize-times) @spark/parallelize-times))
           (send spark/collect-times (fn [& args] 0))
           (send spark/parallelize-times (fn [& args] 0)))
+        (do-check conn)
         (continue conn users updates next))))
   (println "Started test spark-runtime-no-throttle"))
 
@@ -249,6 +295,7 @@
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
+        (do-check conn)
         (continue conn users updates next))))
   (println "Started test clj-runtime-throttled"))
 
@@ -270,6 +317,7 @@
         (if redis-out?
           (println (out-queue-count) "elements in out-queue")
           (println (count @max-directions) "elements in max-directions"))
+        (do-check conn)
         (continue conn users updates next))))
   (println "Started test clj-runtime-no-throttle"))
 
@@ -328,6 +376,8 @@
     (swap! cfg/config assoc-in [:spark :master] (str "local[" cores "]"))
     (spark/setup-spark!)
     (setup-java!)
+    (generate-messages! users updates)
+    (calculate-control! users updates)
     (println "Starting tests...")
     (do-tests conn users updates (mapcat (fn [[test-fn do-test?]]
                                            (if do-test? (repeat num-tests test-fn) nil))
