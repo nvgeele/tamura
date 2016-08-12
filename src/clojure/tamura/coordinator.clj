@@ -30,11 +30,11 @@
             (recur (<! in) started? sources true))
 
         {:destination id :values values}
-        (do (when started?
+        (do (when (and started? (not (empty? values)))
               (assert* (cfg/throttle?) "can only add bulk when throttling is enabled")
               (doseq [source sources]
                 (>! source msg)))
-            (recur (<! in) started? sources true))
+            (recur (<! in) started? sources (not (empty? values))))
 
         {:started? reply-channel}
         (do (>! reply-channel started?)
