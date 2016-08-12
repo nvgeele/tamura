@@ -30,7 +30,12 @@
 (defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
   (let [in (chan)
-        transformer (if (= return-type :multiset) to-regular-multiset to-regular-hash)]
+        throttle? (cfg/throttle?)
+        hash? (= return-type :hash)
+        insert-op (if throttle?
+                    (if hash? hash-insert* multiset-insert*)
+                    (if hash? hash-insert multiset-insert))
+        transformer (if hash? to-regular-hash to-regular-multiset)]
     (go-loop [msg (<! in)
               subs []
               value (cond (and buffer timeout)
@@ -54,31 +59,25 @@
         (recur (<! in) (cons subscriber subs) value changes?)
 
         {:destination id :value new-value}
-        (if (cfg/throttle?)
-          (let [new-coll (if (= return-type :multiset)
-                           (multiset-insert* value new-value)
-                           (hash-insert* value (first new-value) (second new-value)))]
-            (recur (<! in) subs new-coll true))
-          (let [new-coll (if (= return-type :multiset)
-                           (multiset-insert value new-value)
-                           (hash-insert value (first new-value) (second new-value)))]
-            (send-subscribers subs true (transformer new-coll) id)
-            (recur (<! in) subs new-coll false)))
+        (let [new-coll (if hash?
+                         (insert-op value (first new-value) (second new-value))
+                         (insert-op value new-value))]
+          (when-not throttle?
+            (send-subscribers subs true (transformer new-coll) id))
+          (recur (<! in) subs new-coll throttle?))
 
         ;; TODO: implement
         {:destination id :values values}
         (throw (Exception. "finish me"))
 
         {:destination _}
-        (do (when-not (cfg/throttle?)
+        (do (when-not throttle?
               (send-subscribers subs false (transformer value) id))
             (recur (<! in) subs value changes?))
 
         :heartbeat
-        (if (cfg/throttle?)
-          (let [new-value (if (= return-type :multiset)
-                            (multiset-copy value)
-                            (hash-copy value))]
+        (if throttle?
+          (let [new-value (if hash? (hash-copy value) (multiset-copy value))]
             (send-subscribers subs changes? (transformer value) id)
             (recur (<! in) subs new-value false))
           (recur (<! in) subs value changes?))

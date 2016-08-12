@@ -387,7 +387,12 @@
 ;; TODO: capture the value of cfg/throttle? at construction?
 (defn make-source-node
   [id [return-type & {:keys [timeout buffer] :or {timeout false buffer false}}] []]
-  (let [in (chan)]
+  (let [in (chan)
+        throttle? (cfg/throttle?)
+        hash? (= return-type :hash)
+        insert-op (if throttle?
+                    (if hash? hash-insert* multiset-insert*)
+                    (if hash? hash-insert multiset-insert))]
     (go-loop [msg (<! in)
               subs []
               value (cond (and buffer timeout)
@@ -412,36 +417,29 @@
         (recur (<! in) (cons subscriber subs) value rdd changes?)
 
         {:destination id :value new-value}
-        (if (cfg/throttle?)
-          (let [new-coll (if (= return-type :multiset)
-                           (multiset-insert* value new-value)
-                           (hash-insert* value (first new-value) (second new-value)))]
-            (recur (<! in) subs new-coll rdd true))
-          (let [new-coll (if (= return-type :multiset)
-                           (multiset-insert value new-value)
-                           (hash-insert value (first new-value) (second new-value)))
-                rdd (parallelize new-coll)]
-            (send-subscribers* subs true rdd new-coll id)
-            (recur (<! in) subs new-coll rdd false)))
+        (let [new-coll (if hash? (insert-op value (first new-value) (second new-value))
+                                 (insert-op value new-value))
+              rdd (if throttle? rdd (parallelize new-coll))]
+          (when-not throttle?
+            (send-subscribers* subs true rdd new-coll id))
+          (recur (<! in) subs new-coll rdd throttle?))
 
         ;; TODO: implement
         ;; NOTE: if a source receives this message, we assume throttle? is not false
         {:destination id :values values}
-        (let [new-coll (if (= return-type :multiset)
-                         (reduce (fn [s v] (multiset-insert* s v)) value values)
-                         (reduce (fn [h [k v]] (hash-insert* h k v)) value values))]
+        (let [new-coll (if hash?
+                         (reduce (fn [h [k v]] (hash-insert* h k v)) value values)
+                         (reduce (fn [s v] (multiset-insert* s v)) value values))]
           (recur (<! in) subs new-coll rdd true))
 
         {:destination _}
-        (do (when-not (cfg/throttle?)
+        (do (when-not throttle?
               (send-subscribers* subs false rdd value id))
             (recur (<! in) subs value rdd changes?))
 
         :heartbeat
-        (if (cfg/throttle?)
-          (let [new-value (if (= return-type :multiset)
-                            (multiset-copy value)
-                            (hash-copy value))
+        (if throttle?
+          (let [new-value (if hash? (hash-copy value) (multiset-copy value))
                 rdd (parallelize value)]
             (send-subscribers* subs changes? rdd value id)
             (recur (<! in) subs new-value rdd false))
