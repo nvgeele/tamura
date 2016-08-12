@@ -41,7 +41,7 @@
             (recur (<! in) started? sources changes?))
 
         :heartbeat
-        (do (when (and started? (cfg/throttle?))
+        (do (when (and started? (cfg/throttle?) changes?)
               (doseq [source sources]
                 (>! source :heartbeat)))
             (recur (<! in) started? sources false))
